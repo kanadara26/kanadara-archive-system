@@ -2340,9 +2340,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let promoUpdated = 0;
       let usersUpdated = 0;
 
-      const res = await fetch('/api/gsheets/pull');
-      if (res.ok) {
-        const data = await res.json();
+      let data: { rateTsv?: string; promoTsv?: string; usersTsv?: string } | null = null;
+      try {
+        const res = await fetch('/api/gsheets/pull');
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch {
+        data = null;
+      }
+
+      // Vercel 배포 환경 또는 오프라인 환경 등에서 /api/gsheets/pull 미지원 시 최신 미러 JSON 자동 fallback
+      if (!data || !data.rateTsv) {
+        try {
+          const mirrorRes = await fetch('/gsheets_live_mirror.json');
+          if (mirrorRes.ok) {
+            const mirrorJson = await mirrorRes.json();
+            const ops = mirrorJson.batchOps || [];
+            const rateOp = ops.find((o: { range?: string }) =>
+              String(o.range || '').includes('05_요율표_마스터')
+            );
+            const promoOp = ops.find((o: { range?: string }) =>
+              String(o.range || '').includes('06_카드사별_프로모션_마스터')
+            );
+            const usersOp = ops.find((o: { range?: string }) =>
+              String(o.range || '').includes('09_사용자_CM_마스터')
+            );
+
+            data = {
+              rateTsv: rateOp?.data
+                ? rateOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
+                : '',
+              promoTsv: promoOp?.data
+                ? promoOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
+                : '',
+              usersTsv: usersOp?.data
+                ? usersOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
+                : '',
+            };
+          }
+        } catch {
+          // ignore fallback fetch error
+        }
+      }
+
+      if (data) {
         if (data.rateTsv) {
           const parsedRates = parseRateTableFromTsv(data.rateTsv);
           if (parsedRates.rows.length > 0) {

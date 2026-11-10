@@ -136,11 +136,14 @@ export function parseRateTableFromTsv(rawText: string): {
       : '신한';
 
     const rawMethod = (cols[3 + offset] || '').trim();
-    const paymentMethod: SplitPaymentMethod = SPLIT_PAYMENT_METHODS.includes(
-      rawMethod as SplitPaymentMethod
-    )
-      ? (rawMethod as SplitPaymentMethod)
-      : '일시불';
+    let paymentMethod: SplitPaymentMethod = '일시불';
+    if (rawMethod.includes('다이렉트')) {
+      paymentMethod = '다이렉트할부';
+    } else if (rawMethod.includes('할부')) {
+      paymentMethod = '할부';
+    } else {
+      paymentMethod = '일시불';
+    }
 
     const col5 = (cols[5 + offset] || '').trim();
     const col6 = (cols[6 + offset] || '').trim();
@@ -151,13 +154,10 @@ export function parseRateTableFromTsv(rawText: string): {
       ? '기본'
       : (cols[4 + offset] || '기본').trim() || '기본';
 
-    const amountTier = (cols[4 + catOffset] || '2,000만원 이상').trim();
-    const installmentMonths =
-      paymentMethod === '일시불' ? '1달' : (cols[5 + catOffset] || '24 / 36개월').trim();
-    const cashbackRate =
-      paymentMethod === '일시불' ? Number(cols[6 + catOffset]) || 0 : 0;
-    const interestRate =
-      paymentMethod === '일시불' ? 0 : Number(cols[7 + catOffset]) || 0;
+    const amountTier = (cols[4 + catOffset] || (paymentMethod === '일시불' ? '1,000만원 이상' : '전액할부')).trim();
+    const installmentMonths = (cols[5 + catOffset] || (paymentMethod === '일시불' ? '1달' : '24 / 36개월')).trim();
+    const cashbackRate = Number(cols[6 + catOffset]) || 0;
+    const interestRate = paymentMethod === '일시불' ? 0 : Number(cols[7 + catOffset]) || 0;
     const agCommissionRate = Number(cols[8 + catOffset]) || 0;
     const cmCommissionRate = Number(cols[9 + catOffset]) || 0;
     const effectiveDate = (cols[10 + catOffset] || '2026-11-01').trim();

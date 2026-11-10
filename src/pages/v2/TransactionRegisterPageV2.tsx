@@ -83,6 +83,17 @@ function parseAmountTierRange(amountTier: string): {
   return { minAmount: singleVal, maxAmount: null };
 }
 
+function isMethodMatch(m1: string, m2: string): boolean {
+  if (m1 === m2) return true;
+  if (
+    (m1 === '다이렉트' || m1 === '다이렉트할부') &&
+    (m2 === '다이렉트' || m2 === '다이렉트할부')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function findBestRateRowForAmount(
   rows: RateTableRowItem[],
   cardCompany: SplitCardCompany,
@@ -91,7 +102,7 @@ function findBestRateRowForAmount(
   preferredCategory?: string
 ): RateTableRowItem | undefined {
   const baseRows = rows.filter(
-    (r) => r.cardCompany === cardCompany && r.paymentMethod === paymentMethod
+    (r) => r.cardCompany === cardCompany && isMethodMatch(r.paymentMethod, paymentMethod)
   );
   if (baseRows.length === 0) return undefined;
 
@@ -288,16 +299,19 @@ export const TransactionRegisterPageV2: React.FC = () => {
     if (selectedMethodType === '일시불') {
       filtered = cardRows.filter((r) => r.paymentMethod === '일시불');
     } else if (selectedMethodType === '다이렉트') {
-      filtered = cardRows.filter((r) => r.paymentMethod === '다이렉트할부');
+      filtered = cardRows.filter(
+        (r) => r.paymentMethod === '다이렉트할부' || r.paymentMethod === '다이렉트'
+      );
     } else if (selectedMethodType === '할부') {
       filtered = cardRows.filter((r) => r.paymentMethod === '할부');
     } else {
       filtered = cardRows;
     }
 
-    const methodOrder: Record<SplitPaymentMethod, number> = {
+    const methodOrder: Record<string, number> = {
       일시불: 1,
       다이렉트할부: 2,
+      다이렉트: 2,
       할부: 3,
     };
 
@@ -1319,13 +1333,19 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         ((Number(split.amount) || 0) * (Number(split.cashbackRate) || 0)) /
                           100
                       );
-                      const matchedRateRow = rateTableRows.find(
-                        (r) => r.id === selectedRateRowIds[idx]
-                      );
+                      const matchedRateRow =
+                        rateTableRows.find((r) => r.id === selectedRateRowIds[idx]) ||
+                        findBestRateRowForAmount(
+                          rateTableRows,
+                          selectedCard,
+                          split.paymentMethod,
+                          split.amount,
+                          split.rateCategory || '기본'
+                        );
                       const methodRateRows = rateTableRows.filter(
                         (r) =>
                           r.cardCompany === selectedCard &&
-                          r.paymentMethod === split.paymentMethod
+                          isMethodMatch(r.paymentMethod, split.paymentMethod)
                       );
                       const availableCategories = Array.from(
                         new Set(

@@ -123,13 +123,14 @@ export const CARD_COMPANY_COLORS: Record<SplitCardCompany, CardCompanyColorMeta>
   },
 };
 
-// AG 거래승인 요청 결제방법 (일시불, 할부, 다이렉트할부)
-export type SplitPaymentMethod = '일시불' | '할부' | '다이렉트할부';
+// AG 거래승인 요청 결제방법 (일시불, 할부, 다이렉트할부, 다이렉트)
+export type SplitPaymentMethod = '일시불' | '할부' | '다이렉트할부' | '다이렉트';
 
 export const SPLIT_PAYMENT_METHODS: SplitPaymentMethod[] = [
   '일시불',
   '할부',
   '다이렉트할부',
+  '다이렉트',
 ];
 
 // 요율표/조건 구분(유형 옵션) 기본 추천 목록 (시트에서 자유롭게 커스텀 구분명 입력 가능)
