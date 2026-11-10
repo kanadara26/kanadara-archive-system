@@ -150,9 +150,10 @@ export function parseRateTableFromTsv(rawText: string): {
     const isLegacyNoCategory =
       cols.length <= 12 + offset && /달|개월/.test(col5) && !/달|개월/.test(col6);
     const catOffset = offset + (isLegacyNoCategory ? 0 : 1);
-    const category = isLegacyNoCategory
-      ? '기본'
-      : (cols[4 + offset] || '기본').trim() || '기본';
+    const rawCat = isLegacyNoCategory
+      ? '일반'
+      : (cols[4 + offset] || '일반').trim() || '일반';
+    const category = rawCat === '기본' ? '일반' : rawCat;
 
     const amountTier = (cols[4 + catOffset] || (paymentMethod === '일시불' ? '1,000만원 이상' : '전액할부')).trim();
     const installmentMonths = (cols[5 + catOffset] || (paymentMethod === '일시불' ? '1달' : '24 / 36개월')).trim();
