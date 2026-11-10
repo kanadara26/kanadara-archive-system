@@ -253,7 +253,7 @@ interface AppContextValue {
   lastMasterSheetSyncedAt: string;
   isSyncingMasterSheet: boolean;
   pushAllMasterTabsToGoogleSheet: (scopeLabel?: string) => Promise<ActionResult>;
-  pullRateAndPromotionsFromGoogleSheet: () => Promise<ActionResult>;
+  pullRateAndPromotionsFromGoogleSheet: (silent?: boolean) => Promise<ActionResult>;
   importRateTableRowsFromSheetTsv: (
     rawTsv: string,
     mode: 'MERGE' | 'REPLACE'
@@ -391,12 +391,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadStorage(STORAGE_KEYS.RATE_IMAGES, INITIAL_RATE_TABLE_IMAGES)
   );
   const [rateTableRows, setRateTableRows] = useState<RateTableRowItem[]>(() => {
-    const stored = loadStorage(STORAGE_KEYS.RATE_ROWS, INITIAL_RATE_TABLE_ROWS);
-    const defaultMap = new Map(INITIAL_RATE_TABLE_ROWS.map((r) => [r.id, r]));
-    const updatedStored = stored.map((r) => defaultMap.get(r.id) ?? r);
-    const existingIds = new Set(updatedStored.map((r) => r.id));
-    const missingDefaults = INITIAL_RATE_TABLE_ROWS.filter((r) => !existingIds.has(r.id));
-    return missingDefaults.length > 0 ? [...updatedStored, ...missingDefaults] : updatedStored;
+    // 요율표는 구글 시트가 단일 진실 공급원(Single Source of Truth)이므로,
+    // 과거 더미 데이터가 잔존하는 브라우저 localStorage를 완전히 초기화하고
+    // 시트 기반 최신 141개 데이터(INITIAL_RATE_TABLE_ROWS)로 즉시 로드합니다.
+    try {
+      localStorage.removeItem(STORAGE_KEYS.RATE_ROWS);
+      localStorage.removeItem('kanadara_v5_rate_rows');
+    } catch {
+      // ignore
+    }
+    return INITIAL_RATE_TABLE_ROWS;
   });
   const [cardPromotions, setCardPromotions] = useState<CardPromotionItem[]>(() =>
     loadStorage(STORAGE_KEYS.CARD_PROMOS, INITIAL_CARD_PROMOTIONS)
@@ -420,12 +424,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    // 앱 초기 실행 시 public/gsheets_live_mirror.json에서 시트 백업 데이터를 읽어 동기화
+    // 구형 더미 캐시 청소
+    try {
+      localStorage.removeItem(STORAGE_KEYS.RATE_ROWS);
+      localStorage.removeItem('kanadara_v5_rate_rows');
+    } catch {
+      // ignore
+    }
+
+    // 앱 초기 실행 시 public/gsheets_live_mirror.json에서 시트 백업 데이터를 읽어 실시간 동기화
     fetch('/gsheets_live_mirror.json')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!data || !data.batchOps) return;
         const ops = data.batchOps as Array<{ range?: string; data?: (string | number)[][] }>;
+
+        // 05_요율표_마스터 실시간 동기화
+        const rateOp = ops.find((o) => String(o.range || '').includes('05_요율표_마스터'));
+        if (rateOp && rateOp.data && rateOp.data.length > 1) {
+          const rateTsv = rateOp.data
+            .map((r: unknown[]) => (r as unknown[]).map((c) => String(c ?? '')).join('\t'))
+            .join('\n');
+          const parsed = parseRateTableFromTsv(rateTsv);
+          if (parsed.rows.length > 0) {
+            setRateTableRows(parsed.rows);
+          }
+        }
+
+        // 06_카드사별_프로모션_마스터 실시간 동기화
+        const promoOp = ops.find((o) => String(o.range || '').includes('06_카드사별_프로모션_마스터'));
+        if (promoOp && promoOp.data && promoOp.data.length > 1) {
+          const promoTsv = promoOp.data
+            .map((r: unknown[]) => (r as unknown[]).map((c) => String(c ?? '')).join('\t'))
+            .join('\n');
+          const parsed = parsePromotionsFromTsv(promoTsv);
+          if (parsed.promotions.length > 0) {
+            setCardPromotions(parsed.promotions);
+          }
+        }
+
+        // 09_사용자_CM_마스터 실시간 동기화
         const userOp = ops.find((o) => String(o.range || '').includes('09_사용자_CM_마스터'));
         if (userOp && userOp.data && userOp.data.length > 1) {
           const parsed = parseUsersFrom2D(userOp.data);
@@ -469,10 +507,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.RATE_IMAGES, JSON.stringify(rateTableImages));
   }, [rateTableImages]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.RATE_ROWS, JSON.stringify(rateTableRows));
-  }, [rateTableRows]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CARD_PROMOS, JSON.stringify(cardPromotions));
@@ -2325,7 +2359,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const pullRateAndPromotionsFromGoogleSheet = async (): Promise<ActionResult> => {
+  const pullRateAndPromotionsFromGoogleSheet = async (silent = false): Promise<ActionResult> => {
     if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'AG')) {
       return {
         ok: false,
@@ -2411,22 +2445,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLastMasterSheetSyncedAt(now);
       localStorage.setItem('kanadara_v5_master_sheet_synced_at', now);
 
-      pushToast({
-        type: 'success',
-        title: '시트 > 웹앱 조건 및 계정 불러오기(Pull) 완료',
-        description: `05_요율표(${rateUpdated || rateTableRows.length}행) · 06_프로모션(${promoUpdated || cardPromotions.length}건) · 09_사용자_CM(${usersUpdated || users.length}명) 정보가 웹앱에 반영되었습니다.`,
-      });
+      if (!silent) {
+        pushToast({
+          type: 'success',
+          title: '시트 > 웹앱 조건 및 계정 불러오기(Pull) 완료',
+          description: `05_요율표(${rateUpdated || rateTableRows.length}행) · 06_프로모션(${promoUpdated || cardPromotions.length}건) · 09_사용자_CM(${usersUpdated || users.length}명) 정보가 웹앱에 반영되었습니다.`,
+        });
+      }
 
       return {
         ok: true,
         message: '구글 시트에서 최신 요율표 및 조건을 불러왔습니다.',
       };
     } catch {
-      pushToast({
-        type: 'info',
-        title: '구글 시트 조건 동기화 확인 완료',
-        description: `현재 요율표 ${rateTableRows.length}행 · 프로모션 ${cardPromotions.length}건이 최신 상태입니다.`,
-      });
+      if (!silent) {
+        pushToast({
+          type: 'info',
+          title: '구글 시트 조건 동기화 확인 완료',
+          description: `현재 요율표 ${rateTableRows.length}행 · 프로모션 ${cardPromotions.length}건이 최신 상태입니다.`,
+        });
+      }
       return { ok: true, message: '동기화 확인 완료' };
     } finally {
       setIsSyncingMasterSheet(false);

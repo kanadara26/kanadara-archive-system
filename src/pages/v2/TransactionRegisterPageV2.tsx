@@ -228,6 +228,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     users,
     transactions,
     rateTableRows,
+    pullRateAndPromotionsFromGoogleSheet,
     draftsV2,
     saveDraftV2,
     deleteDraftV2,
@@ -240,6 +241,11 @@ export const TransactionRegisterPageV2: React.FC = () => {
     pushToast,
   } = useApp();
   const navigate = useNavigate();
+
+  // 거래 승인건 등록 페이지 진입 시 실시간으로 최신 구글 시트 요율 데이터 자동 동기화
+  useEffect(() => {
+    pullRateAndPromotionsFromGoogleSheet(true).catch(() => {});
+  }, [pullRateAndPromotionsFromGoogleSheet]);
 
   const cmUsers = useMemo(
     () => users.filter((u) => u.role === 'CM' && u.isActive),
@@ -340,7 +346,13 @@ export const TransactionRegisterPageV2: React.FC = () => {
   // 선택된 카드사 + 결제방법에 맞는 요율표 필터링 (결제방법 순 · 금액 구간 오름차순 정렬)
   const matchingRateRows = useMemo(() => {
     if (!selectedCard || !selectedMethodType) return [];
-    const cardRows = rateTableRows.filter((r) => r.cardCompany === selectedCard);
+    const seenIds = new Set<string>();
+    const cardRows = rateTableRows.filter((r) => {
+      if (r.cardCompany !== selectedCard) return false;
+      if (seenIds.has(r.id)) return false;
+      seenIds.add(r.id);
+      return true;
+    });
 
     let filtered: RateTableRowItem[];
     if (selectedMethodType === '일시불') {
@@ -402,7 +414,13 @@ export const TransactionRegisterPageV2: React.FC = () => {
     if (!selectedCard) {
       return { 일시불: 0, 다이렉트: 0, 할부: 0, 혼합: 0 };
     }
-    const cardRows = rateTableRows.filter((r) => r.cardCompany === selectedCard);
+    const seenIds = new Set<string>();
+    const cardRows = rateTableRows.filter((r) => {
+      if (r.cardCompany !== selectedCard) return false;
+      if (seenIds.has(r.id)) return false;
+      seenIds.add(r.id);
+      return true;
+    });
     const lump = cardRows.filter((r) => r.paymentMethod === '일시불').length;
     const direct = cardRows.filter((r) => isMethodMatch(r.paymentMethod, '다이렉트')).length;
     const inst = cardRows.filter((r) => r.paymentMethod === '할부').length;
