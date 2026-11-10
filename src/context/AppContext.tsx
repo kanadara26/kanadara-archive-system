@@ -284,18 +284,28 @@ const DEFAULT_REFERENCE_DATE = '2026-11-02';
 
 const STORAGE_KEYS = {
   CURRENT_USER_ID: 'kanadara_v6_session_user_id',
-  USERS: 'kanadara_v5_users',
-  ASSIGNMENTS: 'kanadara_v5_assignments',
+  USERS: 'kanadara_v6_users',
+  ASSIGNMENTS: 'kanadara_v6_assignments',
   CONDITIONS: 'kanadara_v5_conditions',
   CONDITION_SYNC_LOGS: 'kanadara_v5_condition_sync_logs',
-  TRANSACTIONS: 'kanadara_v5_transactions',
+  TRANSACTIONS: 'kanadara_v6_transactions',
   RATE_IMAGES: 'kanadara_v5_rate_images',
   RATE_ROWS: 'kanadara_v5_rate_rows',
   CARD_PROMOS: 'kanadara_v5_card_promos',
   REF_DATE: 'kanadara_v5_ref_date',
   APP_VERSION: 'kanadara_v5_app_version',
-  DRAFTS_V2: 'kanadara_v5_drafts_v2',
+  DRAFTS_V2: 'kanadara_v6_drafts_v2',
 };
+
+// 이전 버전의 더미 데이터가 남아있는 경우 자동 정리
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.removeItem('kanadara_v5_transactions');
+    window.localStorage.removeItem('kanadara_v5_drafts_v2');
+    window.localStorage.removeItem('kanadara_v5_assignments');
+    window.localStorage.removeItem('kanadara_v5_users');
+  }
+} catch {}
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
@@ -2524,15 +2534,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAssignments(INITIAL_ASSIGNMENTS);
     setConditions(reconcileConditionGroupDates(INITIAL_CONDITIONS));
     setConditionSyncLogs(INITIAL_CONDITION_SYNC_LOGS);
-    setTransactions(normalizeStoredTransactions(INITIAL_TRANSACTIONS));
+    setTransactions([]);
+    setDraftsV2([]);
     setRateTableImages(INITIAL_RATE_TABLE_IMAGES);
     setRateTableRows(INITIAL_RATE_TABLE_ROWS);
     setCardPromotions(INITIAL_CARD_PROMOTIONS);
     setSystemReferenceDateState(DEFAULT_REFERENCE_DATE);
     pushToast({
       type: 'info',
-      title: '더미 데이터가 초기 상태로 복원되었습니다',
-      description: `기준일자(${DEFAULT_REFERENCE_DATE}) 및 모든 거래·요율표·프로모션·조건 시나리오가 초기화되었습니다.`,
+      title: '데이터가 초기화되었습니다',
+      description: '거래 및 임시저장 내역이 모두 초기화되었습니다.',
     });
   };
 

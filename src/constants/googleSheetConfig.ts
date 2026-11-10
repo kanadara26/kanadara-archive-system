@@ -439,37 +439,73 @@ export function serializeTransactionsTo2D(
       ? `전표제출완료(#${tx.slip.approvalNumber}) / 시트:${tx.sheetSync.status}`
       : `전표미제출 / 시트:${tx.sheetSync.status}`;
 
+    const cmUser = users.find((u) => u.id === tx.cmId);
+    const cmName = tx.cmProfile?.name || cmUser?.name || '';
+    const cmRrn = tx.cmProfile?.rrn || cmUser?.rrn || '';
+    const cmBiz = tx.cmProfile?.businessNumber || cmUser?.businessNumber || '';
+    const cmPhone = tx.cmProfile?.phone || cmUser?.phone || '';
+    const cmAff = tx.cmProfile?.affiliation || cmUser?.affiliation || '';
+    const cmEmpId = tx.cmProfile?.employeeId || cmUser?.employeeId || '';
+
+    const totalAmount = tx.amount ?? splits.reduce((acc, s) => acc + (s.amount || 0), 0);
+    const customerCashbackRate =
+      tx.conditionSnapshot?.customerCashbackRate ?? (splits[0]?.cashbackRate || 0);
+
+    let calculatedCashback = 0;
+    try {
+      calculatedCashback = calcExpectedCashback(tx);
+    } catch {
+      calculatedCashback = Math.round((totalAmount * customerCashbackRate) / 100);
+    }
+
     const baseRow: (string | number)[] = [
       tx.id,
       tx.customerName,
       tx.requestDate,
-      APPROVAL_STATUS_META[tx.status].label,
+      APPROVAL_STATUS_META[tx.status]?.label || tx.status,
       tx.settlementStatus || '정산 대기',
       tx.approvalDate || '',
-      tx.cmProfile.name,
-      tx.cmProfile.rrn,
-      tx.cmProfile.businessNumber,
-      tx.cmProfile.phone,
-      tx.cmProfile.affiliation,
-      tx.cmProfile.employeeId,
+      cmName,
+      cmRrn,
+      cmBiz,
+      cmPhone,
+      cmAff,
+      cmEmpId,
       primaryCard,
       cardHex,
       `${splits.length}건`,
       Array.from(new Set(splits.map((s) => s.paymentMethod))).join(' + '),
-      tx.amount,
+      totalAmount,
       splitSummary,
       promoSummary,
-      tx.conditionSnapshot.customerCashbackRate,
-      calcExpectedCashback(tx),
+      customerCashbackRate,
+      calculatedCashback,
     ];
 
+    let agComm = 0;
+    try {
+      agComm = calcExpectedAgCommission(tx);
+    } catch {
+      agComm = Math.round((totalAmount * (splits[0]?.agCommissionRate || 0.85)) / 100);
+    }
+
+    let cmComm = 0;
+    try {
+      cmComm = calcExpectedCommission(tx);
+    } catch {
+      cmComm = Math.round((totalAmount * (splits[0]?.cmCommissionRate || 0.5)) / 100);
+    }
+
     if (!hideAgColumnsForCm) {
-      baseRow.push(tx.conditionSnapshot.agCommissionRate ?? 0.85, calcExpectedAgCommission(tx));
+      baseRow.push(
+        tx.conditionSnapshot?.agCommissionRate ?? (splits[0]?.agCommissionRate ?? 0.85),
+        agComm
+      );
     }
 
     baseRow.push(
-      tx.conditionSnapshot.cmCommissionRate ?? 0.5,
-      calcExpectedCommission(tx),
+      tx.conditionSnapshot?.cmCommissionRate ?? (splits[0]?.cmCommissionRate ?? 0.5),
+      cmComm,
       agUser ? `${agUser.name}(${agUser.affiliation})` : tx.agId,
       slipStatusLabel,
       tx.requestMemo || tx.vehicleInfo || ''
@@ -540,36 +576,38 @@ export function serializeSplitsTo2D(
     const splits = tx.paymentSplits || [];
     splits.forEach((s, idx) => {
       const isLump = s.paymentMethod === '일시불';
-      const cbAmt = isLump ? Math.round((s.amount * s.cashbackRate) / 100) : 0;
-      const agAmt = Math.round((s.amount * s.agCommissionRate) / 100);
-      const cmAmt = Math.round((s.amount * s.cmCommissionRate) / 100);
+      const cbAmt = isLump ? Math.round((s.amount * (s.cashbackRate || 0)) / 100) : 0;
+      const agRate = s.agCommissionRate ?? 0;
+      const cmRate = s.cmCommissionRate ?? 0;
+      const agAmt = Math.round((s.amount * agRate) / 100);
+      const cmAmt = Math.round((s.amount * cmRate) / 100);
 
       const row: (string | number)[] = [
         s.id,
         tx.id,
         `결제 #${idx + 1}`,
         tx.customerName,
-        APPROVAL_STATUS_META[tx.status].label,
+        APPROVAL_STATUS_META[tx.status]?.label || tx.status,
         tx.requestDate,
-        tx.approvalDate,
-        tx.cmProfile.name,
-        tx.cmProfile.employeeId,
+        tx.approvalDate || '',
+        tx.cmProfile?.name || '',
+        tx.cmProfile?.employeeId || '',
         s.cardCompany,
         CARD_COMPANY_COLORS[s.cardCompany]?.mainHex || '#172a88',
         s.paymentMethod,
         s.rateCategory || '기본',
         s.amount,
-        s.installmentMonths,
-        s.cashbackRate,
+        s.installmentMonths || (isLump ? '1달' : '24개월'),
+        s.cashbackRate || 0,
         cbAmt,
-        s.interestRate,
+        s.interestRate || 0,
       ];
 
       if (!hideAgColumnsForCm) {
-        row.push(s.agCommissionRate, agAmt);
+        row.push(agRate, agAmt);
       }
 
-      row.push(s.cmCommissionRate, cmAmt, s.customConditionNote || '');
+      row.push(cmRate, cmAmt, s.customConditionNote || '');
       rows.push(row);
     });
   });
