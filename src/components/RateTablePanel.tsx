@@ -1,0 +1,2129 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Check,
+  Copy,
+  Edit3,
+  ExternalLink,
+  FileSpreadsheet,
+  Gift,
+  Image as ImageIcon,
+  Lock,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Star,
+  Trash2,
+  Upload,
+  X,
+  ZoomIn,
+} from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import {
+  GOOGLE_MASTER_SPREADSHEET_TITLE,
+  GOOGLE_SHEET_TABS,
+  serializePromotionsToTsv,
+  serializeRateTableToTsv,
+} from '../constants/googleSheetConfig';
+import {
+  CARD_COMPANY_COLORS,
+  CardPromotionItem,
+  PROMOTION_PAYMENT_METHODS,
+  PromotionPaymentMethod,
+  RateTableRowItem,
+  SPLIT_CARD_COMPANIES,
+  SPLIT_PAYMENT_METHODS,
+  SplitCardCompany,
+  SplitPaymentMethod,
+} from '../types';
+import { formatSignedKRW, formatSignedRate } from '../utils/format';
+
+interface RateTablePanelProps {
+  isSplitMode?: boolean;
+  onCloseSplit?: () => void;
+  onApplyRowToSplit?: (row: RateTableRowItem) => void;
+  highlightedCardCompany?: SplitCardCompany;
+  highlightedPaymentMethods?: SplitPaymentMethod[];
+  appliedPromotionIds?: string[];
+  onTogglePromotion?: (promo: CardPromotionItem) => void;
+}
+
+export const RateTablePanel: React.FC<RateTablePanelProps> = ({
+  isSplitMode = false,
+  onCloseSplit,
+  onApplyRowToSplit,
+  highlightedCardCompany,
+  highlightedPaymentMethods = [],
+  appliedPromotionIds = [],
+  onTogglePromotion,
+}) => {
+  const {
+    currentUser,
+    rateTableImages,
+    rateTableRows,
+    cardPromotions,
+    addRateTableImage,
+    deleteRateTableImage,
+    saveRateTableRow,
+    deleteRateTableRow,
+    saveCardPromotion,
+    deleteCardPromotion,
+    systemReferenceDate,
+    lastMasterSheetSyncedAt,
+    isSyncingMasterSheet,
+    pushAllMasterTabsToGoogleSheet,
+    pullRateAndPromotionsFromGoogleSheet,
+    importRateTableRowsFromSheetTsv,
+    importPromotionsFromSheetTsv,
+    pushToast,
+  } = useApp();
+
+  const [activeTab, setActiveTab] = useState<'DATA' | 'PROMO' | 'IMAGE'>('DATA');
+  const [showSheetSyncPanel, setShowSheetSyncPanel] = useState(false);
+  const [sheetImportTarget, setSheetImportTarget] = useState<'RATE' | 'PROMO'>('RATE');
+  const [sheetImportMode, setSheetImportMode] = useState<'MERGE' | 'REPLACE'>('MERGE');
+  const [sheetTsvInput, setSheetTsvInput] = useState('');
+  const [cardFilter, setCardFilter] = useState<'ALL' | SplitCardCompany>('ALL');
+  const [methodFilter, setMethodFilter] = useState<'ALL' | SplitPaymentMethod>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pinHighlightedToTop, setPinHighlightedToTop] = useState<boolean>(true);
+  const [onlyHighlightedCard, setOnlyHighlightedCard] = useState<boolean>(false);
+
+  // Admin Image Upload Modal/Form state
+  const [showImageForm, setShowImageForm] = useState(false);
+  const [imgTitle, setImgTitle] = useState('');
+  const [imgCardTag, setImgCardTag] = useState('전 카드사 통합');
+  const [imgEffectiveDate, setImgEffectiveDate] = useState(systemReferenceDate);
+  const [imgUrl, setImgUrl] = useState('');
+  const [imgNote, setImgNote] = useState('');
+  const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
+  const [confirmDeleteRowId, setConfirmDeleteRowId] = useState<string | null>(null);
+  const [confirmDeletePromoId, setConfirmDeletePromoId] = useState<string | null>(null);
+  const [confirmDeleteImageId, setConfirmDeleteImageId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!zoomedImageUrl) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoomedImageUrl(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoomedImageUrl]);
+
+  // Admin Data Row Modal/Form state (supports Create, Edit, and Copy-to-Modify)
+  const [showRowForm, setShowRowForm] = useState(false);
+  const [editingRowId, setEditingRowId] = useState<string | undefined>(undefined);
+  const [copiedFromRowLabel, setCopiedFromRowLabel] = useState<string | null>(null);
+  const [rowCard, setRowCard] = useState<SplitCardCompany>('제휴카드사(삼성)');
+  const [rowMethod, setRowMethod] = useState<SplitPaymentMethod>('일시불');
+  const [rowCategory, setRowCategory] = useState('기본');
+  const [rowTier, setRowTier] = useState('2,000만원 이상');
+  const [rowMonths, setRowMonths] = useState('1달');
+  const [rowCashback, setRowCashback] = useState('1.9');
+  const [rowInterest, setRowInterest] = useState('0');
+  const [rowAgRate, setRowAgRate] = useState('0.85');
+  const [rowCmRate, setRowCmRate] = useState('0.50');
+  const [rowEffectiveDate, setRowEffectiveDate] = useState(systemReferenceDate);
+  const [rowRemark, setRowRemark] = useState('');
+
+  // Admin Card Promotion Form state (supports Create, Edit, Copy-to-Modify, and -% negative adjustments)
+  const [showPromoForm, setShowPromoForm] = useState(false);
+  const [editingPromoId, setEditingPromoId] = useState<string | undefined>(undefined);
+  const [copiedFromPromoLabel, setCopiedFromPromoLabel] = useState<string | null>(null);
+  const [promoCard, setPromoCard] = useState<SplitCardCompany>('제휴카드사(삼성)');
+  const [promoTitle, setPromoTitle] = useState('');
+  const [promoStartDate, setPromoStartDate] = useState(systemReferenceDate);
+  const [promoHasEndDate, setPromoHasEndDate] = useState(false);
+  const [promoEndDate, setPromoEndDate] = useState('2026-11-30');
+  const [promoMethod, setPromoMethod] = useState<PromotionPaymentMethod>('통합');
+  const [promoMinAmount, setPromoMinAmount] = useState('30000000');
+  const [promoMaxAmount, setPromoMaxAmount] = useState('');
+  const [promoAmountLabel, setPromoAmountLabel] = useState('3,000만원 이상');
+  const [promoCashbackDelta, setPromoCashbackDelta] = useState('0');
+  const [promoInterestDelta, setPromoInterestDelta] = useState('0');
+  const [promoAgRate, setPromoAgRate] = useState('0.15');
+  const [promoCmRate, setPromoCmRate] = useState('0.10');
+  const [promoAgAmount, setPromoAgAmount] = useState('100000');
+  const [promoCmAmount, setPromoCmAmount] = useState('50000');
+  const [promoBullets, setPromoBullets] = useState(
+    '• 프로모션 적용 대상:\n• 인센티브/요율 가감(±%) 기준:\n• 유의사항:'
+  );
+
+  const isCm = currentUser?.role === 'CM';
+  // [요구사항 1] 요율표 수정 기능은 오직 ADMIN에게만 부여
+  const canEdit = currentUser?.role === 'ADMIN';
+
+  // 하이라이트 카드사 매칭 건수 집계
+  const highlightedStats = useMemo(() => {
+    if (!highlightedCardCompany) return { rowCount: 0, promoCount: 0 };
+    return {
+      rowCount: rateTableRows.filter((r) => r.cardCompany === highlightedCardCompany).length,
+      promoCount: cardPromotions.filter(
+        (p) => p.cardCompany === highlightedCardCompany && p.isActive
+      ).length,
+    };
+  }, [highlightedCardCompany, rateTableRows, cardPromotions]);
+
+  // 요율표 데이터 행 필터링 + 선택 카드사 하이라이트 상단 정렬
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = rateTableRows.filter((r) => {
+      if (onlyHighlightedCard && highlightedCardCompany) {
+        if (r.cardCompany !== highlightedCardCompany) return false;
+      } else if (cardFilter !== 'ALL' && r.cardCompany !== cardFilter) {
+        return false;
+      }
+      if (methodFilter !== 'ALL' && r.paymentMethod !== methodFilter) return false;
+      if (q) {
+        const hay =
+          `${r.cardCompany} ${r.paymentMethod} ${r.category || '기본'} ${r.amountTier} ${r.installmentMonths} ${r.remark}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (pinHighlightedToTop && highlightedCardCompany) {
+      return [...list].sort((a, b) => {
+        const aMatch = a.cardCompany === highlightedCardCompany ? 1 : 0;
+        const bMatch = b.cardCompany === highlightedCardCompany ? 1 : 0;
+        if (aMatch !== bMatch) return bMatch - aMatch;
+        const aMethodMatch = highlightedPaymentMethods.includes(a.paymentMethod) ? 1 : 0;
+        const bMethodMatch = highlightedPaymentMethods.includes(b.paymentMethod) ? 1 : 0;
+        return bMethodMatch - aMethodMatch;
+      });
+    }
+    return list;
+  }, [
+    rateTableRows,
+    onlyHighlightedCard,
+    highlightedCardCompany,
+    cardFilter,
+    methodFilter,
+    searchQuery,
+    pinHighlightedToTop,
+    highlightedPaymentMethods,
+  ]);
+
+  // 카드사 프로모션 필터링 + 선택 카드사 하이라이트 상단 정렬
+  const filteredPromotions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = cardPromotions.filter((p) => {
+      if (onlyHighlightedCard && highlightedCardCompany) {
+        if (p.cardCompany !== highlightedCardCompany) return false;
+      } else if (cardFilter !== 'ALL' && p.cardCompany !== cardFilter) {
+        return false;
+      }
+      if (methodFilter !== 'ALL' && p.paymentMethod !== '통합' && p.paymentMethod !== methodFilter) {
+        return false;
+      }
+      if (q) {
+        const hay =
+          `${p.cardCompany} ${p.title} ${p.paymentMethod} ${p.amountConditionLabel} ${p.promotionConditionText}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (pinHighlightedToTop && highlightedCardCompany) {
+      return [...list].sort((a, b) => {
+        const aMatch = a.cardCompany === highlightedCardCompany ? 1 : 0;
+        const bMatch = b.cardCompany === highlightedCardCompany ? 1 : 0;
+        return bMatch - aMatch;
+      });
+    }
+    return list;
+  }, [
+    cardPromotions,
+    onlyHighlightedCard,
+    highlightedCardCompany,
+    cardFilter,
+    methodFilter,
+    searchQuery,
+    pinHighlightedToTop,
+  ]);
+
+  if (!currentUser) return null;
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setImgUrl(reader.result);
+        if (!imgTitle) {
+          setImgTitle(file.name.replace(/\.[^/.]+$/, ''));
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddImage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = addRateTableImage({
+      title: imgTitle,
+      cardCompanyTag: imgCardTag,
+      effectiveDate: imgEffectiveDate,
+      imageUrl: imgUrl,
+      note: imgNote,
+    });
+    if (res.ok) {
+      setShowImageForm(false);
+      setImgTitle('');
+      setImgUrl('');
+      setImgNote('');
+    }
+  };
+
+  const openNewRowForm = () => {
+    setEditingRowId(undefined);
+    setCopiedFromRowLabel(null);
+    setRowCard(highlightedCardCompany || '제휴카드사(삼성)');
+    setRowMethod('일시불');
+    setRowCategory('기본');
+    setRowTier('2,000만원 이상');
+    setRowMonths('1달');
+    setRowCashback('1.90');
+    setRowInterest('0');
+    setRowAgRate('0.85');
+    setRowCmRate('0.50');
+    setRowEffectiveDate(systemReferenceDate);
+    setRowRemark('');
+    setShowRowForm(true);
+  };
+
+  const openEditRowForm = (row: RateTableRowItem) => {
+    setEditingRowId(row.id);
+    setCopiedFromRowLabel(null);
+    setRowCard(row.cardCompany);
+    setRowMethod(row.paymentMethod);
+    setRowCategory(row.category || '기본');
+    setRowTier(row.amountTier);
+    setRowMonths(row.installmentMonths);
+    setRowCashback(String(row.cashbackRate));
+    setRowInterest(String(row.interestRate));
+    setRowAgRate(String(row.agCommissionRate));
+    setRowCmRate(String(row.cmCommissionRate));
+    setRowEffectiveDate(row.effectiveDate);
+    setRowRemark(row.remark);
+    setShowRowForm(true);
+  };
+
+  // 요율 데이터 복사해서 필요한 부분만 빠르게 수정하여 신규 등록하는 기능 (ADMIN 전용)
+  const openCopyRowForm = (row: RateTableRowItem) => {
+    setEditingRowId(undefined);
+    setCopiedFromRowLabel(`${row.cardCompany} · ${row.paymentMethod} [${row.category || '기본'}] (${row.amountTier})`);
+    setRowCard(row.cardCompany);
+    setRowMethod(row.paymentMethod);
+    setRowCategory(row.category || '기본');
+    setRowTier(row.amountTier);
+    setRowMonths(row.installmentMonths);
+    setRowCashback(String(row.cashbackRate));
+    setRowInterest(String(row.interestRate));
+    setRowAgRate(String(row.agCommissionRate));
+    setRowCmRate(String(row.cmCommissionRate));
+    setRowEffectiveDate(row.effectiveDate);
+    setRowRemark(row.remark);
+    setShowRowForm(true);
+  };
+
+  const handleSaveRow = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = saveRateTableRow({
+      id: editingRowId,
+      cardCompany: rowCard,
+      paymentMethod: rowMethod,
+      category: rowCategory.trim() || '기본',
+      amountTier: rowTier,
+      installmentMonths: rowMethod === '일시불' ? '1달' : rowMonths,
+      cashbackRate: rowMethod === '일시불' ? parseFloat(rowCashback) || 0 : 0,
+      interestRate: rowMethod === '일시불' ? 0 : parseFloat(rowInterest) || 0,
+      agCommissionRate: parseFloat(rowAgRate) || 0,
+      cmCommissionRate: parseFloat(rowCmRate) || 0,
+      effectiveDate: rowEffectiveDate,
+      remark: rowRemark,
+    });
+    if (res.ok) {
+      setShowRowForm(false);
+      setCopiedFromRowLabel(null);
+    }
+  };
+
+  // 프로모션 폼 열기 (신규 / 수정 / 복사 후 수정)
+  const openNewPromoForm = () => {
+    setEditingPromoId(undefined);
+    setCopiedFromPromoLabel(null);
+    setPromoCard(highlightedCardCompany || '제휴카드사(삼성)');
+    setPromoTitle('');
+    setPromoStartDate(systemReferenceDate);
+    setPromoHasEndDate(false);
+    setPromoEndDate('2026-11-30');
+    setPromoMethod('통합');
+    setPromoMinAmount('30000000');
+    setPromoMaxAmount('');
+    setPromoAmountLabel('3,000만원 이상');
+    setPromoCashbackDelta('0');
+    setPromoInterestDelta('0');
+    setPromoAgRate('0.15');
+    setPromoCmRate('0.10');
+    setPromoAgAmount('100000');
+    setPromoCmAmount('50000');
+    setPromoBullets(
+      '• 프로모션 적용 대상:\n• 인센티브/요율 가감(±%) 기준:\n• 유의사항:'
+    );
+    setShowPromoForm(true);
+  };
+
+  const openEditPromoForm = (p: CardPromotionItem) => {
+    setEditingPromoId(p.id);
+    setCopiedFromPromoLabel(null);
+    setPromoCard(p.cardCompany);
+    setPromoTitle(p.title);
+    setPromoStartDate(p.startDate);
+    setPromoHasEndDate(Boolean(p.endDate));
+    setPromoEndDate(p.endDate || '2026-11-30');
+    setPromoMethod(p.paymentMethod);
+    setPromoMinAmount(String(p.minAmount));
+    setPromoMaxAmount(p.maxAmount ? String(p.maxAmount) : '');
+    setPromoAmountLabel(p.amountConditionLabel);
+    setPromoCashbackDelta(String(p.cashbackRateDelta ?? 0));
+    setPromoInterestDelta(String(p.interestRateDelta ?? 0));
+    setPromoAgRate(String(p.agIncentiveRate));
+    setPromoCmRate(String(p.cmIncentiveRate));
+    setPromoAgAmount(String(p.agIncentiveAmount));
+    setPromoCmAmount(String(p.cmIncentiveAmount));
+    setPromoBullets(p.promotionConditionText);
+    setShowPromoForm(true);
+  };
+
+  const openCopyPromoForm = (p: CardPromotionItem) => {
+    setEditingPromoId(undefined);
+    setCopiedFromPromoLabel(`[${p.cardCompany}] ${p.title}`);
+    setPromoCard(p.cardCompany);
+    setPromoTitle(`${p.title} (복사본)`);
+    setPromoStartDate(p.startDate);
+    setPromoHasEndDate(Boolean(p.endDate));
+    setPromoEndDate(p.endDate || '2026-11-30');
+    setPromoMethod(p.paymentMethod);
+    setPromoMinAmount(String(p.minAmount));
+    setPromoMaxAmount(p.maxAmount ? String(p.maxAmount) : '');
+    setPromoAmountLabel(p.amountConditionLabel);
+    setPromoCashbackDelta(String(p.cashbackRateDelta ?? 0));
+    setPromoInterestDelta(String(p.interestRateDelta ?? 0));
+    setPromoAgRate(String(p.agIncentiveRate));
+    setPromoCmRate(String(p.cmIncentiveRate));
+    setPromoAgAmount(String(p.agIncentiveAmount));
+    setPromoCmAmount(String(p.cmIncentiveAmount));
+    setPromoBullets(p.promotionConditionText);
+    setShowPromoForm(true);
+  };
+
+  const handleSavePromo = (e: React.FormEvent) => {
+    e.preventDefault();
+    const minAmt = parseInt(promoMinAmount, 10) || 0;
+    const maxAmt = promoMaxAmount.trim() ? parseInt(promoMaxAmount, 10) || null : null;
+    const res = saveCardPromotion({
+      id: editingPromoId,
+      cardCompany: promoCard,
+      title: promoTitle,
+      startDate: promoStartDate,
+      endDate: promoHasEndDate ? promoEndDate : null,
+      paymentMethod: promoMethod,
+      minAmount: minAmt,
+      maxAmount: maxAmt,
+      amountConditionLabel:
+        promoAmountLabel.trim() ||
+        `${(minAmt / 10000).toLocaleString()}만원 이상${
+          maxAmt ? ` ~ ${(maxAmt / 10000).toLocaleString()}만원 미만` : ''
+        }`,
+      cashbackRateDelta: parseFloat(promoCashbackDelta) || 0,
+      interestRateDelta: parseFloat(promoInterestDelta) || 0,
+      agIncentiveRate: parseFloat(promoAgRate) || 0,
+      cmIncentiveRate: parseFloat(promoCmRate) || 0,
+      agIncentiveAmount: parseInt(promoAgAmount, 10) || 0,
+      cmIncentiveAmount: parseInt(promoCmAmount, 10) || 0,
+      promotionConditionText: promoBullets,
+      isActive: true,
+    });
+    if (res.ok) {
+      setShowPromoForm(false);
+      setCopiedFromPromoLabel(null);
+    }
+  };
+
+  const activeSelectedCardFilter =
+    onlyHighlightedCard && highlightedCardCompany ? highlightedCardCompany : cardFilter;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
+      {/* 상단 헤더 */}
+      <div className="bg-slate-900 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-200">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-extrabold tracking-tight">
+                카드사별 요율표 · 프로모션 조견표
+              </h3>
+              {canEdit ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/40">
+                  <ShieldCheck className="w-3 h-3" />
+                  ADMIN 편집 모드
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                  <Lock className="w-3 h-3 text-slate-400" />
+                  조회 전용
+                </span>
+              )}
+              {isSplitMode && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-200 border border-emerald-400/30">
+                  2분할 비교 모드
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              카드사별 금리·캐시백·수수료율 및 프로모션 조견표
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 탭 전환 버튼 (데이터 표 / 카드사 프로모션 / 이미지 형식) */}
+          <div className="inline-flex rounded-xl bg-slate-800/90 p-1 border border-slate-700">
+            <button
+              type="button"
+              onClick={() => setActiveTab('DATA')}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'DATA'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              데이터 표 ({rateTableRows.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('PROMO')}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'PROMO'
+                  ? 'bg-amber-500 text-slate-950 shadow'
+                  : 'text-amber-300 hover:text-white'
+              }`}
+            >
+              <Gift className="w-3.5 h-3.5" />
+              카드사 프로모션 ({cardPromotions.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('IMAGE')}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'IMAGE'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              이미지 ({rateTableImages.length})
+            </button>
+          </div>
+
+          {onCloseSplit && (
+            <button
+              type="button"
+              onClick={onCloseSplit}
+              title="2분할 요율표 닫기"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white text-xs font-bold border border-slate-700 transition-colors"
+            >
+              <X className="w-4 h-4" />
+              닫기
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 실제 구글 시트 마스터 연동 상태 바 & 1-Click 시트 열기 */}
+      <div className="bg-emerald-950/95 text-emerald-100 px-4 py-2 border-b border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-extrabold text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Google Sheets 실시간 마스터 연동됨
+          </span>
+          <span className="font-bold text-white truncate max-w-xs sm:max-w-md">
+            {GOOGLE_MASTER_SPREADSHEET_TITLE}
+          </span>
+          <span className="text-[11px] text-emerald-300/90 font-mono">
+            (최근 동기화: {lastMasterSheetSyncedAt})
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <a
+            href={GOOGLE_SHEET_TABS.REGISTRATION_CONSOLE.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] border border-amber-300 transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" />
+            00_등록(GAS)
+          </a>
+          <a
+            href={GOOGLE_SHEET_TABS.RATE_TABLE_MASTER.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-800/80 hover:bg-emerald-700 text-white font-medium text-[11px] border border-emerald-500/40 transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" />
+            05_요율표
+          </a>
+          <a
+            href={GOOGLE_SHEET_TABS.PROMOTION_MASTER.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-800/80 hover:bg-emerald-700 text-white font-medium text-[11px] border border-emerald-500/40 transition-colors"
+          >
+            <ExternalLink className="w-3 h-3" />
+            06_프로모션
+          </a>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowSheetSyncPanel((prev) => !prev)}
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md font-bold text-[11px] border transition-all ${
+                showSheetSyncPanel
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400/50'
+              }`}
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
+              {showSheetSyncPanel ? '동기화 닫기' : '동기화(Push/Pull)'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ADMIN 전용: 구글 시트 마스터 실시간 양방향 동기화(Push / Pull / TSV 붙여넣기) 패널 */}
+      {canEdit && showSheetSyncPanel && (
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50/70 to-indigo-50 border-b-2 border-emerald-300 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                [ADMIN 전용] 실제 구글 시트 (05_요율표_마스터 · 06_카드사별_프로모션_마스터) 양방향 연동
+              </h4>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                웹앱에서 수정한 요율표·프로모션(±% 마이너스 반영 포함)을 실제 구글 시트에 즉시 반영(Push)하거나, 구글 시트에서 수정한 행을 불러와(Pull / 붙여넣기) 업데이트합니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                disabled={isSyncingMasterSheet}
+                onClick={() => pullRateAndPromotionsFromGoogleSheet()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
+                실제 구글 시트에서 불러오기 (Pull)
+              </button>
+              <button
+                type="button"
+                disabled={isSyncingMasterSheet}
+                onClick={() => pushAllMasterTabsToGoogleSheet('05_요율표 & 06_프로모션 마스터')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                현재 데이터를 구글 시트에 즉시 반영 (Push)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const tsv =
+                    sheetImportTarget === 'RATE'
+                      ? serializeRateTableToTsv(rateTableRows, true)
+                      : serializePromotionsToTsv(cardPromotions, true);
+                  navigator.clipboard.writeText(tsv);
+                  pushToast({
+                    type: 'success',
+                    title: `${
+                      sheetImportTarget === 'RATE'
+                        ? '05_요율표_마스터'
+                        : '06_카드사별_프로모션_마스터'
+                    } 시트 붙여넣기용 TSV 복사 완료`,
+                    description: '구글 시트 A1 셀을 선택하고 Ctrl+V를 누르면 표 전체가 그대로 입력됩니다.',
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5 text-indigo-600" />
+                현재 탭 TSV 클립보드 복사
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-3 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-extrabold text-slate-700">
+                  구글 시트 복사·붙여넣기 대상:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSheetImportTarget('RATE')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                    sheetImportTarget === 'RATE'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-slate-50 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  05_요율표_마스터 ({rateTableRows.length}행)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetImportTarget('PROMO')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                    sheetImportTarget === 'PROMO'
+                      ? 'bg-amber-500 text-slate-950 border-amber-500'
+                      : 'bg-slate-50 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  06_카드사별_프로모션_마스터 ({cardPromotions.length}건)
+                </button>
+
+                <select
+                  value={sheetImportMode}
+                  onChange={(e) => setSheetImportMode(e.target.value as 'MERGE' | 'REPLACE')}
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800"
+                >
+                  <option value="MERGE">기존 데이터에 병합/갱신 (Upsert)</option>
+                  <option value="REPLACE">시트 데이터로 전체 교체 (Replace)</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (sheetImportTarget === 'RATE') {
+                    setSheetTsvInput(
+                      'rt-row-sheet-1\t국민\t#faba07\t일시불\t저금리\t3,000만원 이상\t1달\t2.05\t0\t0.88\t0.55\t2026-11-05\t[구글시트연동] KB국민 11월 중순 특판 일시불 상향'
+                    );
+                  } else {
+                    setSheetTsvInput(
+                      'promo-sheet-kb-1\t국민\t#faba07\tKB국민 11월 시트연동 다이렉트할부 저금리(-0.4%) 특판\t2026-11-05\t계속 진행\t다이렉트할부\t25000000\t\t2,500만원 이상\t0\t-0.4\t-0.15\t-0.1\t0\t0\t• 시트 연동 저금리(-0.4%) 특판 / • AG -0.15%, CM -0.10% 마이너스 요율 반영\tTRUE\t2026-11-04 12:30'
+                    );
+                  }
+                }}
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+              >
+                시트 행 샘플 자동채우기
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <textarea
+                rows={2}
+                value={sheetTsvInput}
+                onChange={(e) => setSheetTsvInput(e.target.value)}
+                placeholder={
+                  sheetImportTarget === 'RATE'
+                    ? '05_요율표_마스터 시트에서 행을 드래그하여 복사(Ctrl+C)한 뒤 여기에 붙여넣으세요(Ctrl+V)...'
+                    : '06_카드사별_프로모션_마스터 시트에서 행을 복사(Ctrl+C)한 뒤 여기에 붙여넣으세요(Ctrl+V)...'
+                }
+                className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 font-mono text-xs focus:border-emerald-600 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!sheetTsvInput.trim()) return;
+                  const res =
+                    sheetImportTarget === 'RATE'
+                      ? importRateTableRowsFromSheetTsv(sheetTsvInput, sheetImportMode)
+                      : importPromotionsFromSheetTsv(sheetTsvInput, sheetImportMode);
+                  if (res.ok) {
+                    setSheetTsvInput('');
+                  }
+                }}
+                className="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+              >
+                시트 붙여넣기 행 즉시 반영
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* [요구사항 #3] 카드사별 메인 컬러 한눈에 구분·필터 바 */}
+      <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-extrabold text-slate-600 mr-1">
+            카드사 컬러 구분:
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setOnlyHighlightedCard(false);
+              setCardFilter('ALL');
+            }}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
+              activeSelectedCardFilter === 'ALL'
+                ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+            }`}
+          >
+            전체보기
+          </button>
+          {SPLIT_CARD_COMPANIES.map((card) => {
+            const cMeta = CARD_COMPANY_COLORS[card];
+            const isSelected = activeSelectedCardFilter === card;
+            const isHighlightTarget = highlightedCardCompany === card;
+            return (
+              <button
+                key={card}
+                type="button"
+                onClick={() => {
+                  setOnlyHighlightedCard(false);
+                  setCardFilter(isSelected ? 'ALL' : card);
+                }}
+                style={
+                  isSelected
+                    ? {
+                        backgroundColor: cMeta.mainHex,
+                        color: cMeta.badgeTextHex,
+                        borderColor: cMeta.mainHex,
+                      }
+                    : {
+                        backgroundColor: cMeta.softBgHex,
+                        color: cMeta.darkTextHex,
+                        borderColor: cMeta.mainHex,
+                      }
+                }
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
+                  isSelected ? 'shadow-sm scale-[1.02]' : 'hover:opacity-90'
+                } ${isHighlightTarget ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
+                title={`${card} 메인 컬러 (${cMeta.mainHex}) 필터`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/15"
+                  style={{ backgroundColor: cMeta.mainHex }}
+                />
+                <span>{card}</span>
+                {isHighlightTarget && (
+                  <Star className="w-3 h-3 fill-current shrink-0" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* [요구사항 #4] 결제정보에 선택된 카드사 자동 하이라이트 컨트롤 바 */}
+      {highlightedCardCompany && (
+        <div
+          className="border-b px-4 py-2.5 flex flex-wrap items-center justify-between gap-2"
+          style={{
+            backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].softBgHex,
+            borderColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-black shadow-2xs"
+              style={{
+                backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
+                color: CARD_COMPANY_COLORS[highlightedCardCompany].badgeTextHex,
+              }}
+            >
+              <Star className="w-3.5 h-3.5 fill-current" />
+              결제정보 선택 카드사 하이라이트: {highlightedCardCompany} (
+              {CARD_COMPANY_COLORS[highlightedCardCompany].mainHex})
+            </span>
+            <span
+              className="text-[11px] font-extrabold"
+              style={{ color: CARD_COMPANY_COLORS[highlightedCardCompany].darkTextHex }}
+            >
+              요율 {highlightedStats.rowCount}건 · 진행 프로모션 {highlightedStats.promoCount}건 매칭됨
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPinHighlightedToTop((v) => !v)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                pinHighlightedToTop
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-600 border-slate-300'
+              }`}
+            >
+              {pinHighlightedToTop ? '★ 선택 카드사 최상단 고정 ON' : '최상단 고정 OFF'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOnlyHighlightedCard((v) => !v)}
+              style={
+                onlyHighlightedCard
+                  ? {
+                      backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
+                      color: CARD_COMPANY_COLORS[highlightedCardCompany].badgeTextHex,
+                      borderColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
+                    }
+                  : undefined
+              }
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                onlyHighlightedCard
+                  ? ''
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+              }`}
+            >
+              {onlyHighlightedCard
+                ? `${highlightedCardCompany}만 단독 표시 중`
+                : `${highlightedCardCompany}만 모아보기`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          탭 1: 별도 데이터 표 형식 (카드사별 메인 컬러 적용 + 선택 카드사 하이라이트 + ADMIN 전용 수정)
+         ===================================================================== */}
+      {activeTab === 'DATA' && (
+        <div className="p-4 space-y-3">
+          {/* 필터 & Admin 데이터 추가 버튼 (카드사 필터는 상단 브랜드 컬러 바에서 단일 제어) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={methodFilter}
+                onChange={(e) => setMethodFilter(e.target.value as 'ALL' | SplitPaymentMethod)}
+                aria-label="요율표 결제방법 필터"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
+              >
+                <option value="ALL">결제방법 전체</option>
+                {SPLIT_PAYMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="구간·비고 검색..."
+                  className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs w-44 focus:outline-none focus:border-slate-500"
+                />
+              </div>
+            </div>
+
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openNewRowForm}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                신규 요율 등록
+              </button>
+            )}
+          </div>
+
+          {/* ADMIN 전용 요율 행 추가 / 수정 / [복사 후 수정 등록] 인라인 폼 */}
+          {showRowForm && canEdit && (
+            <form
+              onSubmit={handleSaveRow}
+              className={`rounded-xl p-4 space-y-3 border-2 ${
+                copiedFromRowLabel
+                  ? 'bg-amber-50/80 border-amber-400'
+                  : 'bg-indigo-50/70 border-indigo-200'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {copiedFromRowLabel ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2 py-0.5 text-[11px] font-black text-slate-950">
+                      <Copy className="w-3 h-3" />
+                      복사하여 신규 등록 모드
+                    </span>
+                  ) : null}
+                  <span className="text-xs font-extrabold text-indigo-950">
+                    {editingRowId
+                      ? '기존 요율 데이터 행 수정 (ADMIN)'
+                      : copiedFromRowLabel
+                      ? `복사 원본 [${copiedFromRowLabel}] 기반 → 필요한 항목만 수정 후 신규 등록`
+                      : '신규 요율표 데이터 행 등록 (ADMIN)'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRowForm(false);
+                    setCopiedFromRowLabel(null);
+                  }}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                >
+                  취소
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div>
+                  <label htmlFor="rt-card-select" className="block text-xs font-bold text-slate-700 mb-1">카드사</label>
+                  <select
+                    id="rt-card-select"
+                    value={rowCard}
+                    onChange={(e) => setRowCard(e.target.value as SplitCardCompany)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold"
+                  >
+                    {SPLIT_CARD_COMPANIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="rt-method-select" className="block text-xs font-bold text-slate-700 mb-1">결제방법</label>
+                  <select
+                    id="rt-method-select"
+                    value={rowMethod}
+                    onChange={(e) => {
+                      const next = e.target.value as SplitPaymentMethod;
+                      setRowMethod(next);
+                      if (next === '일시불') {
+                        setRowMonths('1달');
+                        setRowInterest('0');
+                      } else {
+                        setRowMonths('24 / 36 / 48개월');
+                        setRowCashback('0');
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold"
+                  >
+                    {SPLIT_PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="rt-category-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    구분 (유형 옵션)
+                  </label>
+                  <input
+                    id="rt-category-input"
+                    type="text"
+                    list="rt-category-presets"
+                    value={rowCategory}
+                    onChange={(e) => setRowCategory(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                    placeholder="예: 기본, 저금리, 선입금(가상계좌)"
+                  />
+                  <datalist id="rt-category-presets">
+                    <option value="기본" />
+                    <option value="저금리" />
+                    <option value="고금리(고수수료)" />
+                    <option value="선입금(가상계좌)" />
+                    <option value="신용한도" />
+                    <option value="중도상환면제" />
+                    <option value="신규발급특판" />
+                  </datalist>
+                </div>
+                <div>
+                  <label htmlFor="rt-tier-input" className="block text-xs font-bold text-slate-700 mb-1">금액 구간</label>
+                  <input
+                    id="rt-tier-input"
+                    type="text"
+                    value={rowTier}
+                    onChange={(e) => setRowTier(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                    placeholder="예: 3,000만원 이상"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-months-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    할부개월 (일시불 1달)
+                  </label>
+                  <input
+                    id="rt-months-input"
+                    type="text"
+                    value={rowMethod === '일시불' ? '1달' : rowMonths}
+                    disabled={rowMethod === '일시불'}
+                    onChange={(e) => setRowMonths(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-cashback-input" className="block text-xs font-bold text-blue-700 mb-1">
+                    캐시백 % (일시불 전용)
+                  </label>
+                  <input
+                    id="rt-cashback-input"
+                    type="number"
+                    step="0.01"
+                    value={rowMethod === '일시불' ? rowCashback : '0'}
+                    disabled={rowMethod !== '일시불'}
+                    onChange={(e) => setRowCashback(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-blue-700"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-interest-input" className="block text-xs font-bold text-amber-700 mb-1">
+                    할부 금리 % (할부 전용)
+                  </label>
+                  <input
+                    id="rt-interest-input"
+                    type="number"
+                    step="0.01"
+                    value={rowMethod === '일시불' ? '0' : rowInterest}
+                    disabled={rowMethod === '일시불'}
+                    onChange={(e) => setRowInterest(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-amber-700"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-ag-rate-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    AG 수수료율 (%)
+                  </label>
+                  <input
+                    id="rt-ag-rate-input"
+                    type="number"
+                    step="0.01"
+                    value={rowAgRate}
+                    onChange={(e) => setRowAgRate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-cm-rate-input" className="block text-xs font-bold text-emerald-700 mb-1">
+                    CM 수수료율 (%)
+                  </label>
+                  <input
+                    id="rt-cm-rate-input"
+                    type="number"
+                    step="0.01"
+                    value={rowCmRate}
+                    onChange={(e) => setRowCmRate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-emerald-700"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <input
+                  type="date"
+                  aria-label="요율 실행일자"
+                  value={rowEffectiveDate}
+                  onChange={(e) => setRowEffectiveDate(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+                <input
+                  type="text"
+                  aria-label="요율 비고 및 세부조건"
+                  value={rowRemark}
+                  onChange={(e) => setRowRemark(e.target.value)}
+                  placeholder="비고 및 세부 조건 안내"
+                  className="flex-1 min-w-[180px] px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {editingRowId
+                    ? '수정 저장'
+                    : copiedFromRowLabel
+                    ? '복사본 신규 등록'
+                    : '신규 등록'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* 데이터 표 (카드사별 메인 컬러 적용) */}
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase">
+                  <th className="py-2.5 px-3">카드사 (전용 컬러)</th>
+                  <th className="py-2.5 px-2.5">결제방법</th>
+                  <th className="py-2.5 px-2.5">적용구간 / 개월</th>
+                  <th className="py-2.5 px-2.5 text-right">캐시백(일시불)</th>
+                  <th className="py-2.5 px-2.5 text-right">금리(할부)</th>
+                  {!isCm && (
+                    <th className="py-2.5 px-2.5 text-right bg-indigo-950 text-indigo-200">
+                      AG 수수료율
+                    </th>
+                  )}
+                  <th className="py-2.5 px-2.5 text-right bg-emerald-950 text-emerald-200">
+                    CM 수수료율
+                  </th>
+                  <th className="py-2.5 px-3">비고 / 실행일</th>
+                  {(onApplyRowToSplit || canEdit) && (
+                    <th className="py-2.5 px-2.5 text-center">
+                      {canEdit ? '동작 (적용·복사·수정·삭제)' : '승인요청 폼 적용'}
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-xs">
+                {filteredRows.map((row) => {
+                  const isLump = row.paymentMethod === '일시불';
+                  const cardColor = CARD_COMPANY_COLORS[row.cardCompany];
+                  const isHighlightedCard =
+                    Boolean(highlightedCardCompany) &&
+                    row.cardCompany === highlightedCardCompany;
+                  const isHighlightedMethod =
+                    isHighlightedCard &&
+                    highlightedPaymentMethods.includes(row.paymentMethod);
+
+                  return (
+                    <tr
+                      key={row.id}
+                      style={{
+                        borderLeft: `6px solid ${cardColor.mainHex}`,
+                        backgroundColor: isHighlightedCard
+                          ? cardColor.softBgHex
+                          : undefined,
+                      }}
+                      className={`transition-colors ${
+                        isHighlightedCard
+                          ? 'ring-1 ring-inset ring-amber-400 font-semibold'
+                          : highlightedCardCompany
+                          ? 'bg-white opacity-80 hover:opacity-100 hover:bg-slate-50'
+                          : 'hover:bg-slate-50/90'
+                      }`}
+                    >
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            style={{
+                              backgroundColor: cardColor.mainHex,
+                              color: cardColor.badgeTextHex,
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-black shadow-2xs"
+                          >
+                            {isHighlightedCard && (
+                              <Star className="w-3 h-3 fill-current shrink-0" />
+                            )}
+                            {row.cardCompany}
+                          </span>
+                          {isHighlightedCard && (
+                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-slate-950">
+                              선택
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                              row.paymentMethod === '일시불'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : row.paymentMethod === '다이렉트할부'
+                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                            }`}
+                          >
+                            {row.paymentMethod}
+                          </span>
+                          <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
+                            {row.category || '기본'}
+                          </span>
+                          {isHighlightedMethod && (
+                            <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
+                              일치
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-2.5">
+                        <div className="font-bold text-slate-900">{row.amountTier}</div>
+                        <div className="text-[11px] text-slate-500">할부: {row.installmentMonths}</div>
+                      </td>
+                      <td className="py-2.5 px-2.5 text-right font-extrabold whitespace-nowrap">
+                        {isLump ? (
+                          <span className="text-blue-600">{row.cashbackRate.toFixed(2)}%</span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-2.5 text-right font-extrabold whitespace-nowrap">
+                        {!isLump ? (
+                          <span className="text-amber-700">{row.interestRate.toFixed(2)}%</span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+                      {!isCm && (
+                        <td className="py-2.5 px-2.5 text-right font-extrabold text-indigo-700 bg-indigo-50/40 whitespace-nowrap">
+                          {row.agCommissionRate.toFixed(2)}%
+                        </td>
+                      )}
+                      <td className="py-2.5 px-2.5 text-right font-extrabold text-emerald-700 bg-emerald-50/40 whitespace-nowrap">
+                        {row.cmCommissionRate.toFixed(2)}%
+                      </td>
+                      <td className="py-2.5 px-3 text-[11px] text-slate-600">
+                        <div>{row.remark}</div>
+                        <div className="text-[10px] text-slate-400">실행일: {row.effectiveDate}</div>
+                      </td>
+                      {(onApplyRowToSplit || canEdit) && (
+                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            {onApplyRowToSplit && (
+                              <button
+                                type="button"
+                                onClick={() => onApplyRowToSplit(row)}
+                                className="inline-flex items-center gap-1 min-h-7 px-3 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700"
+                                title="좌측 승인요청 폼의 선택된 결제 행에 이 요율을 즉시 채웁니다"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                적용
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => openCopyRowForm(row)}
+                                className="inline-flex items-center gap-1 min-h-7 px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                title="이 요율 행을 그대로 복사하여 필요한 부분만 수정 후 새 행으로 등록합니다"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                                복사등록
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                type="button"
+                                aria-label="요율 행 직접 수정"
+                                onClick={() => openEditRowForm(row)}
+                                className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-slate-200 text-slate-600 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                                title="기존 요율 행 직접 수정"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {canEdit &&
+                              (confirmDeleteRowId === row.id ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-50 border border-rose-200 px-2 py-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      deleteRateTableRow(row.id);
+                                      setConfirmDeleteRowId(null);
+                                    }}
+                                    className="text-xs font-bold text-rose-700 hover:underline"
+                                  >
+                                    삭제확인
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteRowId(null)}
+                                    className="text-xs text-slate-500 hover:text-slate-800"
+                                  >
+                                    취소
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  aria-label="요율 행 삭제"
+                                  onClick={() => setConfirmDeleteRowId(row.id)}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                                  title="삭제"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              ))}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          탭 2: 카드사 별 프로모션 (ADMIN 전용 수정 + 캐시백/금리/AG/CM ±% 마이너스 반영 지원 + 카드사 컬러 적용)
+         ===================================================================== */}
+      {activeTab === 'PROMO' && (
+        <div className="p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <span className="text-xs text-slate-600">
+              상단 카드사 컬러 바에서 카드사를 선택해 필터링하며, <strong>+ % 가산</strong> 및{' '}
+              <strong className="text-rose-600">- % 마이너스 요율 반영</strong>을 모두 지원합니다.
+            </span>
+
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openNewPromoForm}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black shadow-sm transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                카드사 프로모션 추가
+              </button>
+            )}
+          </div>
+
+          {/* ADMIN 전용 프로모션 등록 / 수정 / 복사 등록 폼 (+% 및 -% 마이너스 요율 반영 지원) */}
+          {showPromoForm && canEdit && (
+            <form
+              onSubmit={handleSavePromo}
+              className={`rounded-xl p-4 space-y-3 border-2 ${
+                copiedFromPromoLabel
+                  ? 'bg-amber-50/90 border-amber-400'
+                  : 'bg-indigo-50/70 border-indigo-200'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-900">
+                  {editingPromoId
+                    ? '카드사 프로모션 수정 (ADMIN · ±% 마이너스 반영 지원)'
+                    : copiedFromPromoLabel
+                    ? `프로모션 복사 등록 (원본: ${copiedFromPromoLabel})`
+                    : '신규 카드사 별 프로모션 등록 (ADMIN · ±% 마이너스 반영 지원)'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPromoForm(false);
+                    setCopiedFromPromoLabel(null);
+                  }}
+                  className="text-xs font-bold text-slate-500"
+                >
+                  취소
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">카드사</label>
+                  <select
+                    value={promoCard}
+                    onChange={(e) => setPromoCard(e.target.value as SplitCardCompany)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                  >
+                    {SPLIT_CARD_COMPANIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    프로모션 제목
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={promoTitle}
+                    onChange={(e) => setPromoTitle(e.target.value)}
+                    placeholder="예: 삼성 다이렉트할부 저금리(-0.5%) 특판 (AG/CM 마이너스 요율 반영)"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* 기간 & 결제방법 */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    프로모션 시작일
+                  </label>
+                  <input
+                    type="date"
+                    value={promoStartDate}
+                    onChange={(e) => setPromoStartDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-700">
+                      마감일 (미지정 시 계속 진행)
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!promoHasEndDate}
+                        onChange={(e) => setPromoHasEndDate(!e.target.checked)}
+                      />
+                      계속 진행
+                    </label>
+                  </div>
+                  {promoHasEndDate ? (
+                    <input
+                      type="date"
+                      value={promoEndDate}
+                      onChange={(e) => setPromoEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      disabled
+                      value="마감일 없음 (계속 진행)"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-700"
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    결제방법 (일시불/할부/다이렉트할부/통합)
+                  </label>
+                  <select
+                    value={promoMethod}
+                    onChange={(e) => setPromoMethod(e.target.value as PromotionPaymentMethod)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                  >
+                    {PROMOTION_PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* 금액조건 */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    최소 금액 (원)
+                  </label>
+                  <input
+                    type="number"
+                    step="1000000"
+                    value={promoMinAmount}
+                    onChange={(e) => setPromoMinAmount(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    최대 금액 (원, 비워두면 제한없음)
+                  </label>
+                  <input
+                    type="number"
+                    step="1000000"
+                    value={promoMaxAmount}
+                    onChange={(e) => setPromoMaxAmount(e.target.value)}
+                    placeholder="제한 없음"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    금액조건 라벨 (금액대 지정 표기)
+                  </label>
+                  <input
+                    type="text"
+                    value={promoAmountLabel}
+                    onChange={(e) => setPromoAmountLabel(e.target.value)}
+                    placeholder="예: 3,000만원 이상 ~ 5,000만원 미만"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* [요구사항 2] 기존 캐시백·금리·AG·CM 요율에 + % 또는 - % (마이너스 반영) 설정 */}
+              <div className="rounded-xl border border-rose-200 bg-white p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold text-slate-800">
+                    요율 가감 설정 (±% : 양수 입력 시 가산, <strong className="text-rose-600">음수 - 입력 시 기존 캐시백·금리·AG·CM 요율에 마이너스 반영</strong>)
+                  </span>
+                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                    예: -0.20 입력 시 기존 요율에서 -0.20% 차감 반영
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-blue-700 mb-1">
+                      캐시백 요율 변동 (±%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-20"
+                      max="20"
+                      value={promoCashbackDelta}
+                      onChange={(e) => setPromoCashbackDelta(e.target.value)}
+                      placeholder="예: -0.20 또는 0.15"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-extrabold text-blue-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-700 mb-1">
+                      할부 금리 변동 (±%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-20"
+                      max="20"
+                      value={promoInterestDelta}
+                      onChange={(e) => setPromoInterestDelta(e.target.value)}
+                      placeholder="예: -0.50 (금리인하)"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-amber-200 bg-white text-xs font-extrabold text-amber-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-indigo-700 mb-1">
+                      AG 요율 변동 (±%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-20"
+                      max="20"
+                      value={promoAgRate}
+                      onChange={(e) => setPromoAgRate(e.target.value)}
+                      placeholder="예: 0.15 또는 -0.20"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs font-extrabold text-indigo-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-700 mb-1">
+                      CM 요율 변동 (±%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-20"
+                      max="20"
+                      value={promoCmRate}
+                      onChange={(e) => setPromoCmRate(e.target.value)}
+                      placeholder="예: 0.10 또는 -0.10"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-white text-xs font-extrabold text-emerald-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-indigo-700 mb-1">
+                      AG 추가/차감 인센티브 정액 (원, ± 가능)
+                    </label>
+                    <input
+                      type="number"
+                      step="10000"
+                      value={promoAgAmount}
+                      onChange={(e) => setPromoAgAmount(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs font-bold text-indigo-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-700 mb-1">
+                      CM 추가/차감 인센티브 정액 (원, ± 가능)
+                    </label>
+                    <input
+                      type="number"
+                      step="10000"
+                      value={promoCmAmount}
+                      onChange={(e) => setPromoCmAmount(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-white text-xs font-bold text-emerald-700"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 프로모션 조건 (불릿포인트 식 장문 텍스트 설명) */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  프로모션 조건 상세 (불릿포인트 • 식 장문 텍스트 설명)
+                </label>
+                <textarea
+                  rows={4}
+                  value={promoBullets}
+                  onChange={(e) => setPromoBullets(e.target.value)}
+                  placeholder="• 대상 결제방법: ...&#10;• 인센티브/마이너스 요율 반영 기준: ...&#10;• 유의사항: ..."
+                  className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-xs leading-relaxed"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-xs font-extrabold text-white"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {editingPromoId
+                    ? '프로모션 수정 저장'
+                    : copiedFromPromoLabel
+                    ? '복사본 프로모션 등록'
+                    : '프로모션 등록'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* 프로모션 카드 목록 (카드사별 메인 컬러 + ±% 마이너스 요율 표시) */}
+          <div className="space-y-3">
+            {filteredPromotions.map((p) => {
+              const cardColor = CARD_COMPANY_COLORS[p.cardCompany];
+              const isHighlighted =
+                Boolean(highlightedCardCompany) &&
+                p.cardCompany === highlightedCardCompany;
+              const isApplied = appliedPromotionIds.includes(p.id);
+              const cbDelta = Number(p.cashbackRateDelta) || 0;
+              const intDelta = Number(p.interestRateDelta) || 0;
+              const hasNegativeRate =
+                cbDelta < 0 || intDelta < 0 || p.agIncentiveRate < 0 || p.cmIncentiveRate < 0;
+
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    backgroundColor: isHighlighted ? cardColor.softBgHex : undefined,
+                  }}
+                  className={`rounded-xl border p-4 transition-all ${
+                    isHighlighted
+                      ? 'border-amber-400 ring-1 ring-amber-300 shadow-xs'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          style={{
+                            backgroundColor: cardColor.mainHex,
+                            color: cardColor.badgeTextHex,
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-xs font-black shadow-2xs"
+                        >
+                          {isHighlighted && <Star className="w-3 h-3 fill-current" />}
+                          {p.cardCompany}
+                        </span>
+                        {isHighlighted && (
+                          <span className="inline-flex items-center gap-0.5 rounded bg-amber-500 px-2 py-0.5 text-xs font-black text-slate-950">
+                            선택 카드사
+                          </span>
+                        )}
+                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-800">
+                          결제방법: {p.paymentMethod}
+                        </span>
+                        <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-800 border border-blue-200">
+                          금액조건: {p.amountConditionLabel}
+                        </span>
+                        <span
+                          className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                            p.endDate
+                              ? 'bg-slate-100 text-slate-700'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          기간: {p.startDate} ~ {p.endDate ? p.endDate : '계속 진행'}
+                        </span>
+                        {hasNegativeRate && (
+                          <span className="rounded-md bg-rose-100 border border-rose-300 px-2 py-0.5 text-xs font-extrabold text-rose-800">
+                            -% 마이너스 요율 반영
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-black text-slate-900 pt-0.5">{p.title}</h4>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {onTogglePromotion && !isCm && (
+                        <button
+                          type="button"
+                          onClick={() => onTogglePromotion(p)}
+                          className={`inline-flex items-center gap-1 min-h-7 px-3 py-1 rounded-lg text-xs font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 ${
+                            isApplied
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          }`}
+                        >
+                          <Gift className="w-3.5 h-3.5" />
+                          {isApplied ? '현재 거래 적용중' : '+ 거래에 추가'}
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => openCopyPromoForm(p)}
+                          className="inline-flex items-center gap-1 min-h-7 px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                          title="이 프로모션을 복사하여 필요한 부분만 수정 후 신규 등록"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          복사등록
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          aria-label="프로모션 수정"
+                          onClick={() => openEditPromoForm(p)}
+                          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-slate-200 text-slate-600 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                          title="수정"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canEdit &&
+                        (confirmDeletePromoId === p.id ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-50 border border-rose-200 px-2 py-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deleteCardPromotion(p.id);
+                                setConfirmDeletePromoId(null);
+                              }}
+                              className="text-xs font-bold text-rose-700 hover:underline"
+                            >
+                              삭제확인
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeletePromoId(null)}
+                              className="text-xs text-slate-500 hover:text-slate-800"
+                            >
+                              취소
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label="프로모션 삭제"
+                            onClick={() => setConfirmDeletePromoId(p.id)}
+                            className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                            title="삭제"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* 캐시백 / 금리 / AG / CM 요율 변동 (±% 마이너스 반영 포함) 및 정액 배지 */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
+                    {cbDelta !== 0 && (
+                      <div
+                        className={`rounded-lg border px-2.5 py-1.5 font-extrabold ${
+                          cbDelta < 0
+                            ? 'bg-rose-50 border-rose-200 text-rose-800'
+                            : 'bg-blue-50 border-blue-200 text-blue-800'
+                        }`}
+                      >
+                        캐시백 요율 반영: <strong>{formatSignedRate(cbDelta)}</strong>
+                      </div>
+                    )}
+                    {intDelta !== 0 && (
+                      <div
+                        className={`rounded-lg border px-2.5 py-1.5 font-extrabold ${
+                          intDelta < 0
+                            ? 'bg-amber-50 border-amber-300 text-amber-900'
+                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                        }`}
+                      >
+                        할부 금리 반영: <strong>{formatSignedRate(intDelta)}</strong>
+                      </div>
+                    )}
+                    {!isCm && (
+                      <div
+                        className={`rounded-lg border px-3 py-1.5 font-bold ${
+                          p.agIncentiveRate < 0 || p.agIncentiveAmount < 0
+                            ? 'bg-rose-50 border-rose-200 text-rose-900'
+                            : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                        }`}
+                      >
+                        AG 요율 반영:{' '}
+                        <strong
+                          className={
+                            p.agIncentiveRate < 0 ? 'text-rose-700' : 'text-indigo-700'
+                          }
+                        >
+                          {formatSignedRate(p.agIncentiveRate)}
+                        </strong>
+                        {p.agIncentiveAmount !== 0 && (
+                          <>
+                            {' '}
+                            · 정액 <strong>{formatSignedKRW(p.agIncentiveAmount)}</strong>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <div
+                      className={`rounded-lg border px-3 py-1.5 font-bold ${
+                        p.cmIncentiveRate < 0 || p.cmIncentiveAmount < 0
+                          ? 'bg-rose-50 border-rose-200 text-rose-900'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      }`}
+                    >
+                      CM 요율 반영:{' '}
+                      <strong
+                        className={
+                          p.cmIncentiveRate < 0 ? 'text-rose-700' : 'text-emerald-700'
+                        }
+                      >
+                        {formatSignedRate(p.cmIncentiveRate)}
+                      </strong>
+                      {p.cmIncentiveAmount !== 0 && (
+                        <>
+                          {' '}
+                          · 정액 <strong>{formatSignedKRW(p.cmIncentiveAmount)}</strong>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 불릿포인트 장문 설명 */}
+                  <div className="mt-2.5 rounded-lg bg-slate-900/5 border border-slate-200/80 p-3 text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+                    {p.promotionConditionText}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          탭 3: 이미지 형식 (ADMIN 전용 등록·삭제)
+         ===================================================================== */}
+      {activeTab === 'IMAGE' && (
+        <div className="p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="text-xs text-slate-600">
+              관리자(Admin)가 업로드한 카드사 공식 요율표 및 프로모션 이미지 원본입니다. 이미지를 클릭하면 크게 확대됩니다.
+            </div>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setShowImageForm((v) => !v)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                요율표 이미지 추가 (ADMIN)
+              </button>
+            )}
+          </div>
+
+          {showImageForm && canEdit && (
+            <form
+              onSubmit={handleAddImage}
+              className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-indigo-950">
+                  신규 요율표 이미지 등록 (ADMIN 전용 · 파일 업로드 또는 이미지 URL)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowImageForm(false)}
+                  className="text-xs text-slate-500"
+                >
+                  닫기
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <input
+                  type="text"
+                  required
+                  value={imgTitle}
+                  onChange={(e) => setImgTitle(e.target.value)}
+                  placeholder="요율표 제목 (예: 11월 2차 신한·국민 요율표)"
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+                <input
+                  type="text"
+                  value={imgCardTag}
+                  onChange={(e) => setImgCardTag(e.target.value)}
+                  placeholder="카드사 태그 (예: 신한·국민)"
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+                <input
+                  type="date"
+                  value={imgEffectiveDate}
+                  onChange={(e) => setImgEffectiveDate(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-indigo-400 bg-white text-xs font-bold text-indigo-700 cursor-pointer hover:bg-indigo-50">
+                  <Upload className="w-4 h-4" />
+                  내 PC에서 요율표 이미지 파일 선택 (PNG/JPG/SVG)
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+                <input
+                  type="text"
+                  value={imgUrl}
+                  onChange={(e) => setImgUrl(e.target.value)}
+                  placeholder="또는 이미지 URL 직접 붙여넣기"
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={imgNote}
+                  onChange={(e) => setImgNote(e.target.value)}
+                  placeholder="안내 메모 (선택)"
+                  className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                >
+                  이미지 등록
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="space-y-4">
+            {rateTableImages.map((img) => {
+              const matchesHighlight =
+                Boolean(highlightedCardCompany) &&
+                (img.cardCompanyTag.includes('전 카드사') ||
+                  img.cardCompanyTag.includes(highlightedCardCompany!));
+              return (
+                <div
+                  key={img.id}
+                  className={`border rounded-xl overflow-hidden bg-slate-900/5 ${
+                    matchesHighlight
+                      ? 'border-amber-400 ring-2 ring-amber-300'
+                      : 'border-slate-200'
+                  }`}
+                >
+                  <div className="bg-white px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        {matchesHighlight && (
+                          <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black">
+                            ★ {highlightedCardCompany} 포함
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[11px] font-bold">
+                          {img.cardCompanyTag}
+                        </span>
+                        <span className="text-xs font-extrabold text-slate-900">{img.title}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        실행일: {img.effectiveDate} · 등록: {img.uploadedBy} ({img.uploadedAt}) · {img.note}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setZoomedImageUrl(img.imageUrl)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                        확대보기
+                      </button>
+                      {canEdit &&
+                        (confirmDeleteImageId === img.id ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-rose-50 border border-rose-200 px-2 py-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deleteRateTableImage(img.id);
+                                setConfirmDeleteImageId(null);
+                              }}
+                              className="text-xs font-bold text-rose-700 hover:underline"
+                            >
+                              삭제확인
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteImageId(null)}
+                              className="text-xs text-slate-500 hover:text-slate-800"
+                            >
+                              취소
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteImageId(img.id)}
+                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600"
+                            title="이미지 삭제"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${img.title} 이미지 원본 확대보기`}
+                    onClick={() => setZoomedImageUrl(img.imageUrl)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setZoomedImageUrl(img.imageUrl);
+                      }
+                    }}
+                    className="p-3 bg-slate-900 flex justify-center cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                  >
+                    <img
+                      src={img.imageUrl}
+                      alt={img.title}
+                      loading="lazy"
+                      decoding="async"
+                      className="max-h-[420px] w-auto rounded-lg shadow border border-slate-700"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 이미지 원본 확대 모달 */}
+      {zoomedImageUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="요율표 이미지 원본 확대보기"
+          onClick={() => setZoomedImageUrl(null)}
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-5xl w-full bg-slate-900 rounded-2xl border border-slate-700 p-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+              <span className="text-sm font-bold text-white">요율표 이미지 원본 확대보기</span>
+              <button
+                type="button"
+                aria-label="확대 모달 닫기"
+                onClick={() => setZoomedImageUrl(null)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-rose-600 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              >
+                닫기 (ESC)
+              </button>
+            </div>
+            <div className="overflow-auto max-h-[80vh] flex justify-center">
+              <img src={zoomedImageUrl} alt="요율표 확대" className="max-w-full h-auto rounded-lg" />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
