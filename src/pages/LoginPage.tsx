@@ -15,11 +15,11 @@ import {
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { users, login, getAssignedAgForCm, getAssignedCmsForAg } = useApp();
+  const { users, login, appVersion, getAssignedAgForCm, getAssignedCmsForAg } = useApp();
   const navigate = useNavigate();
 
-  const [loginId, setLoginId] = useState('cm.kim@autodealer.kr');
-  const [password, setPassword] = useState('password123');
+  const [loginId, setLoginId] = useState('');
+  const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -31,6 +31,10 @@ export const LoginPage: React.FC = () => {
       setIsSubmitting(false);
       if (!res.ok) {
         setErrorMessage(res.message);
+        return;
+      }
+      if (appVersion === 'v2') {
+        navigate('/v2/dashboard');
         return;
       }
       const matched = users.find(
@@ -47,18 +51,17 @@ export const LoginPage: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginId.trim() || !password.trim()) {
-      setErrorMessage('아이디(이메일)와 비밀번호를 모두 입력해 주세요.');
+      setErrorMessage('아이디와 비밀번호를 모두 입력해 주세요.');
       return;
     }
     performLogin(loginId, password);
   };
 
   const demoAccounts = [
-    users.find((u) => u.id === 'usr-cm-1'),
-    users.find((u) => u.id === 'usr-cm-2'),
-    users.find((u) => u.id === 'usr-ag-1'),
-    users.find((u) => u.id === 'usr-ag-2'),
-    users.find((u) => u.id === 'usr-admin-1'),
+    users.find((u) => u.id === 'usr-v2-admin' && u.isActive),
+    ...users.filter((u) => u.role === 'AG' && u.isActive),
+    users.find((u) => u.id === 'usr-admin-1' && u.isActive),
+    ...users.filter((u) => u.role === 'CM' && u.isActive).slice(0, 2),
   ].filter(Boolean);
 
   return (

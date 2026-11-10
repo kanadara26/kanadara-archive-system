@@ -14,6 +14,7 @@ import {
   Plus,
   RotateCcw,
   ShieldCheck,
+  Trash2,
   Upload,
   UserCheck,
   UserPlus,
@@ -28,6 +29,7 @@ export const SettingsPageV2: React.FC = () => {
     rateTableRows,
     cardPromotions,
     saveUserAccount,
+    deleteUserAccount,
     quickSwitchUser,
     lastMasterSheetSyncedAt,
     isSyncingMasterSheet,
@@ -137,6 +139,7 @@ export const SettingsPageV2: React.FC = () => {
   const [showTsvPaste, setShowTsvPaste] = useState<boolean>(false);
   const [tsvText, setTsvText] = useState<string>('');
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
+  const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<string | null>(null);
 
   const cmUsers = useMemo(() => {
     const list = users.filter((u) => u.role === 'CM');
@@ -470,6 +473,37 @@ export const SettingsPageV2: React.FC = () => {
                       >
                         {ag.isActive ? '사용중지' : '활성화'}
                       </button>
+                      {confirmDeleteUserId === ag.id ? (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteUserAccount(ag.id);
+                              setConfirmDeleteUserId(null);
+                              if (editingAgId === ag.id) handleResetAgForm();
+                            }}
+                            className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
+                          >
+                            삭제 확인
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteUserId(null)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteUserId(ag.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          삭제
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -692,6 +726,38 @@ export const SettingsPageV2: React.FC = () => {
                     >
                       {cm.isActive ? '숨김' : '활성화'}
                     </button>
+                    {isAdmin &&
+                      (confirmDeleteUserId === cm.id ? (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteUserAccount(cm.id);
+                              setConfirmDeleteUserId(null);
+                              if (editingCmId === cm.id) handleResetCmForm();
+                            }}
+                            className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
+                          >
+                            삭제 확인
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteUserId(null)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                          >
+                            취소
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteUserId(cm.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          삭제
+                        </button>
+                      ))}
                   </div>
                 </div>
               );

@@ -237,6 +237,7 @@ interface AppContextValue {
 
   // Admin / Operations & Condition Sheet Sync actions
   saveUserAccount: (input: SaveUserInput) => ActionResult;
+  deleteUserAccount: (userId: string) => ActionResult;
   saveAgAssignments: (agId: string, cmIds: string[]) => ActionResult;
   saveDealCondition: (input: SaveConditionInput) => ActionResult;
   toggleConditionActive: (conditionId: string) => ActionResult;
@@ -279,7 +280,7 @@ interface AppContextValue {
 const DEFAULT_REFERENCE_DATE = '2026-11-02';
 
 const STORAGE_KEYS = {
-  CURRENT_USER_ID: 'kanadara_v5_current_user_id',
+  CURRENT_USER_ID: 'kanadara_v6_session_user_id',
   USERS: 'kanadara_v5_users',
   ASSIGNMENTS: 'kanadara_v5_assignments',
   CONDITIONS: 'kanadara_v5_conditions',
@@ -351,8 +352,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>(() => {
     const stored = loadStorage(STORAGE_KEYS.USERS, INITIAL_USERS);
     const existingIds = new Set(stored.map((u) => u.id));
-    const missingDefaults = INITIAL_USERS.filter((u) => !existingIds.has(u.id));
-    return missingDefaults.length > 0 ? [...missingDefaults, ...stored] : stored;
+    // ADMIN 계정만 누락 시 복구하고, ADMIN이 삭제한 AG/CM 계정은 재초기화되지 않도록 유지
+    const missingAdminDefaults = INITIAL_USERS.filter(
+      (u) => u.role === 'ADMIN' && !existingIds.has(u.id)
+    );
+    return missingAdminDefaults.length > 0
+      ? [...missingAdminDefaults, ...stored]
+      : stored;
   });
   const [assignments, setAssignments] = useState<AgCmAssignment[]>(() =>
     loadStorage(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS)
@@ -392,8 +398,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     () => localStorage.getItem(STORAGE_KEYS.REF_DATE) || DEFAULT_REFERENCE_DATE
   );
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-    return saved || 'usr-ag-1';
+    return sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID) || null;
   });
   const [lastMasterSheetSyncedAt, setLastMasterSheetSyncedAt] = useState<string>(
     () => localStorage.getItem('kanadara_v5_master_sheet_synced_at') || '2026-11-04 12:18'
@@ -447,31 +452,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (currentUserId) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, currentUserId);
+      sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, currentUserId);
     } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+      sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
     }
   }, [currentUserId]);
 
   const currentUser = useMemo(() => {
+    if (!currentUserId) return null;
     const found = users.find((u) => u.id === currentUserId && u.isActive) ?? null;
-    if (appVersion === 'v2') {
-      if (!found || found.role === 'CM') {
-        return (
-          users.find((u) => u.role === 'AG' && u.isActive) ||
-          users.find((u) => u.role === 'ADMIN' && u.isActive) ||
-          found
-        );
-      }
+    if (!found) return null;
+    if (appVersion === 'v2' && found.role === 'CM') {
+      return (
+        users.find((u) => u.role === 'AG' && u.isActive) ||
+        users.find((u) => u.role === 'ADMIN' && u.isActive) ||
+        found
+      );
     }
     return found;
   }, [users, currentUserId, appVersion]);
 
   const setAppVersion = (ver: 'v1' | 'v2') => {
     setAppVersionState(ver);
-    if (ver === 'v2') {
+    if (ver === 'v2' && currentUser && currentUser.role === 'CM') {
       const agUser = users.find((u) => u.role === 'AG' && u.isActive);
-      if (agUser && (!currentUser || currentUser.role === 'CM')) {
+      if (agUser) {
         setCurrentUserId(agUser.id);
       }
     }
@@ -1879,11 +1884,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       pushToast({
         type: 'success',
-        title: '신규 CM 등록 완료',
+        title: `${input.role} 등록 완료`,
         description: `${newUser.name} (${resolvedAffiliation}) 정보가 저장되었습니다.`,
       });
-      return { ok: true, message: '신규 CM 정보가 등록되었습니다.' };
+      return { ok: true, message: `신규 ${input.role} 정보가 등록되었습니다.` };
     }
+  };
+
+  // [요구사항] ADMIN 전용: 이미 등록되어 있는 AG 및 CM 데이터 삭제
+  const deleteUserAccount = (userId: string): ActionResult => {
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return {
+        ok: false,
+        message: '관리자(ADMIN)만 등록된 AG 및 CM 데이터를 삭제할 수 있습니다.',
+      };
+    }
+
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { ok: false, message: '삭제할 AG 또는 CM 데이터를 찾을 수 없습니다.' };
+    }
+
+    if (target.role === 'ADMIN') {
+      return { ok: false, message: '관리자(ADMIN) 계정은 삭제할 수 없습니다.' };
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setAssignments((prev) =>
+      prev.filter((a) => a.agId !== userId && a.cmId !== userId)
+    );
+
+    if (currentUserId === userId) {
+      setCurrentUserId(currentUser.id);
+    }
+
+    pushToast({
+      type: 'info',
+      title: `${target.role} 데이터 삭제 완료`,
+      description: `${target.name} (${target.affiliation}) 데이터가 삭제되었습니다.`,
+    });
+    return { ok: true, message: `${target.name} (${target.role}) 데이터가 삭제되었습니다.` };
   };
 
   // 1.2.2 AG 담당 CM 배정
@@ -2510,6 +2550,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         saveCardPromotion,
         deleteCardPromotion,
         saveUserAccount,
+        deleteUserAccount,
         saveAgAssignments,
         saveDealCondition,
         toggleConditionActive,

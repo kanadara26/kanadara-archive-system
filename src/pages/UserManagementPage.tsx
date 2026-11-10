@@ -11,6 +11,7 @@ import {
   X,
   CheckCircle2,
   XCircle,
+  Trash2,
 } from 'lucide-react';
 
 export const UserManagementPage: React.FC = () => {
@@ -20,11 +21,13 @@ export const UserManagementPage: React.FC = () => {
     getAssignedAgForCm,
     getAssignedCmsForAg,
     saveUserAccount,
+    deleteUserAccount,
   } = useApp();
 
   const [roleFilter, setRoleFilter] = useState<UserRole | 'ALL'>('ALL');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<string | null>(null);
 
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -244,14 +247,48 @@ export const UserManagementPage: React.FC = () => {
                       )}
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(u)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-600"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                        수정
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(u)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-600"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                          수정
+                        </button>
+                        {currentUser.role === 'ADMIN' &&
+                          u.role !== 'ADMIN' &&
+                          (confirmDeleteUserId === u.id ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  deleteUserAccount(u.id);
+                                  setConfirmDeleteUserId(null);
+                                }}
+                                className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+                              >
+                                삭제 확인
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteUserId(null)}
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteUserId(u.id)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              삭제
+                            </button>
+                          ))}
+                      </div>
                     </td>
                   </tr>
                 );

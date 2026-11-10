@@ -12,6 +12,7 @@ import {
   UserCheck,
   ChevronDown,
   KeyRound,
+  LogOut,
   UserPlus,
 } from 'lucide-react';
 
@@ -21,6 +22,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     users,
     quickSwitchUser,
     login,
+    logout,
     draftsV2,
     lastMasterSheetSyncedAt,
     setAppVersion,
@@ -55,8 +57,8 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
   const handleDirectLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginIdInput.trim()) return;
-    const ok = login(loginIdInput.trim(), passwordInput);
-    if (ok) {
+    const res = login(loginIdInput.trim(), passwordInput);
+    if (res.ok) {
       setLoginModalOpen(false);
       setAccountMenuOpen(false);
       setLoginIdInput('');
@@ -332,6 +334,18 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                     >
                       <KeyRound className="h-3.5 w-3.5 text-slate-500" />
                       <span>아이디 / 비밀번호로 직접 로그인</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        logout();
+                        navigate('/login');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      <span>로그아웃</span>
                     </button>
                   </div>
                 </div>

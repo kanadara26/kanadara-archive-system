@@ -52,25 +52,29 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 const ProtectedRouteV2: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { currentUser } = useApp();
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
   return <AppShellV2>{children}</AppShellV2>;
 };
 
 const RootRedirect: React.FC = () => {
   const { currentUser, appVersion } = useApp();
+  if (!currentUser) return <Navigate to="/login" replace />;
   if (appVersion === 'v2') {
     return <Navigate to="/v2/dashboard" replace />;
   }
-  if (!currentUser) return <Navigate to="/login" replace />;
   if (currentUser.role === 'ADMIN') return <Navigate to="/admin/overview" replace />;
   return <Navigate to="/transactions" replace />;
 };
 
 const LoginRoute: React.FC = () => {
   const { currentUser, appVersion } = useApp();
-  if (appVersion === 'v2') {
-    return <Navigate to="/v2/dashboard" replace />;
-  }
   if (currentUser) {
+    if (appVersion === 'v2') {
+      return <Navigate to="/v2/dashboard" replace />;
+    }
     return (
       <Navigate
         to={currentUser.role === 'ADMIN' ? '/admin/overview' : '/transactions'}
