@@ -106,6 +106,7 @@ export const SettingsPageV2: React.FC = () => {
     });
     if (res.ok) {
       handleResetAgForm();
+      pushAllMasterTabsToGoogleSheet('AG 계정 등록/수정');
     }
   };
 
@@ -121,6 +122,7 @@ export const SettingsPageV2: React.FC = () => {
       phone: ag.phone,
       isActive: !ag.isActive,
     });
+    pushAllMasterTabsToGoogleSheet('AG 계정 활성상태 변경');
   };
 
   // =========================================================================
@@ -198,6 +200,7 @@ export const SettingsPageV2: React.FC = () => {
     });
     if (res.ok) {
       handleResetCmForm();
+      pushAllMasterTabsToGoogleSheet('CM 계정 등록/수정');
     }
   };
 
@@ -214,6 +217,7 @@ export const SettingsPageV2: React.FC = () => {
       employeeId: cm.employeeId,
       isActive: !cm.isActive,
     });
+    pushAllMasterTabsToGoogleSheet('CM 계정 활성상태 변경');
   };
 
   return (
@@ -481,6 +485,7 @@ export const SettingsPageV2: React.FC = () => {
                               deleteUserAccount(ag.id);
                               setConfirmDeleteUserId(null);
                               if (editingAgId === ag.id) handleResetAgForm();
+                              pushAllMasterTabsToGoogleSheet('AG 계정 삭제');
                             }}
                             className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
                           >
@@ -735,6 +740,7 @@ export const SettingsPageV2: React.FC = () => {
                               deleteUserAccount(cm.id);
                               setConfirmDeleteUserId(null);
                               if (editingCmId === cm.id) handleResetCmForm();
+                              pushAllMasterTabsToGoogleSheet('CM 계정 삭제');
                             }}
                             className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
                           >
@@ -777,7 +783,7 @@ export const SettingsPageV2: React.FC = () => {
               구글 시트 연동 (Pull / Push)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              최근 동기화: <span className="font-mono font-semibold">{lastMasterSheetSyncedAt}</span>
+              최근 동기화: <span className="font-mono font-semibold">{lastMasterSheetSyncedAt}</span> · 05_요율표 · 06_프로모션 · 07_거래내역 · 08_분할결제 · <strong>09_사용자_CM_마스터</strong> 실시간 연동
             </p>
           </div>
 

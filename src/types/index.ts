@@ -594,6 +594,17 @@ export const V2_CARD_DISPLAY_NAMES: Record<SplitCardCompany, string> = {
   '제휴카드사(삼성)': '제휴카드',
 };
 
+export const CARD_LOGO_URLS: Record<string, string> = {
+  국민: '/logos/kb.png',
+  농협: '/logos/nh.png',
+  롯데: '/logos/lotte.png',
+  신한: '/logos/shinhan.png',
+  우리: '/logos/woori.png',
+  하나: '/logos/hana.png',
+  삼성: '/logos/samsung.png',
+  '제휴카드사(삼성)': '/logos/samsung.png',
+};
+
 export const V2_CARD_LOGO_URLS: Record<SplitCardCompany, string> = {
   국민: '/logos/kb.png',
   농협: '/logos/nh.png',

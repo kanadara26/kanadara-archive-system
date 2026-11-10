@@ -78,6 +78,12 @@ export const GOOGLE_SHEET_TABS = {
     url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=628666182`,
     desc: '복합 분할결제 건별 상세 행 데이터베이스 (일시불+할부 개별 집계용)',
   },
+  USER_CM_MASTER: {
+    id: 2084826623,
+    title: '09_사용자_CM_마스터',
+    url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=2084826623`,
+    desc: 'AG 및 CM 사용자 계정 원장 (로그인 계정 및 CM 프로필 실시간 영구 연동 DB)',
+  },
 } as const;
 
 // 1. 05_요율표_마스터 헤더 및 직렬화/역직렬화
@@ -570,3 +576,77 @@ export function serializeSplitsTo2D(
 
   return [headers, ...rows];
 }
+
+// 5. 09_사용자_CM_마스터 헤더 및 직렬화/역직렬화
+export const USER_CM_SHEET_HEADERS = [
+  '사용자ID',
+  '구분(ROLE)',
+  '이름',
+  '로그인ID',
+  '비밀번호',
+  '소속/대리점',
+  '연락처',
+  '사업자등록번호',
+  '주민등록번호',
+  '사번',
+  '활성상태',
+  '생성일시',
+];
+
+export function serializeUsersTo2D(users: User[]): (string | number)[][] {
+  const body = users.map((u) => [
+    u.id,
+    u.role,
+    u.name,
+    u.loginId,
+    u.password,
+    u.affiliation || '',
+    u.phone || '',
+    u.businessNumber || '',
+    u.rrn || '',
+    u.employeeId || '',
+    u.isActive ? 'Y' : 'N',
+    u.createdAt || nowFormatted(),
+  ]);
+  return [USER_CM_SHEET_HEADERS, ...body];
+}
+
+export function parseUsersFrom2D(rows: (string | number)[][]): User[] {
+  if (!rows || rows.length <= 1) return [];
+  const result: User[] = [];
+  const body = rows.slice(1);
+  for (const r of body) {
+    const id = String(r[0] || '').trim();
+    const roleRaw = String(r[1] || '').trim().toUpperCase();
+    const name = String(r[2] || '').trim();
+    const loginId = String(r[3] || '').trim();
+    if (!id || !name || !loginId) continue;
+    const role = (roleRaw === 'ADMIN' ? 'ADMIN' : roleRaw === 'AG' ? 'AG' : 'CM') as User['role'];
+    const password = String(r[4] || 'password123').trim();
+    const affiliation = String(r[5] || '').trim();
+    const phone = String(r[6] || '').trim();
+    const businessNumber = String(r[7] || '').trim() || undefined;
+    const rrn = String(r[8] || '').trim() || undefined;
+    const employeeId = String(r[9] || '').trim() || undefined;
+    const activeStr = String(r[10] || '').trim().toUpperCase();
+    const isActive = activeStr !== 'N' && activeStr !== 'FALSE' && activeStr !== '0';
+    const createdAt = String(r[11] || '').trim() || nowFormatted();
+
+    result.push({
+      id,
+      role,
+      name,
+      loginId,
+      password,
+      affiliation,
+      phone,
+      businessNumber,
+      rrn,
+      employeeId,
+      isActive,
+      createdAt,
+    });
+  }
+  return result;
+}
+

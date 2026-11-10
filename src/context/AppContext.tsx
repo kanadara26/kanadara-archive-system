@@ -41,6 +41,7 @@ import {
   mapSplitCardToCardCompany,
   nowFormatted,
   ParsedSheetConditionRow,
+  parseUsersFromTsv,
   reconcileConditionGroupDates,
   validateAndMaskIdentifier,
 } from '../utils/format';
@@ -49,10 +50,12 @@ import {
   GOOGLE_MASTER_SPREADSHEET_TITLE,
   parsePromotionsFromTsv,
   parseRateTableFromTsv,
+  parseUsersFrom2D,
   serializePromotionsTo2D,
   serializeRateTableTo2D,
   serializeSplitsTo2D,
   serializeTransactionsTo2D,
+  serializeUsersTo2D,
 } from '../constants/googleSheetConfig';
 
 export interface ToastMessage {
@@ -407,8 +410,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.APP_VERSION, appVersion);
-  }, [appVersion]);
+    // 앱 초기 실행 시 public/gsheets_live_mirror.json에서 시트 백업 데이터를 읽어 동기화
+    fetch('/gsheets_live_mirror.json')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data || !data.batchOps) return;
+        const ops = data.batchOps as Array<{ range?: string; data?: (string | number)[][] }>;
+        const userOp = ops.find((o) => String(o.range || '').includes('09_사용자_CM_마스터'));
+        if (userOp && userOp.data && userOp.data.length > 1) {
+          const parsed = parseUsersFrom2D(userOp.data);
+          if (parsed.length > 0) {
+            setUsers((prev) => {
+              const existingMap = new Map(prev.map((u) => [u.id, u]));
+              // 시트에 등록된 최신 사용자 정보 병합
+              parsed.forEach((u) => existingMap.set(u.id, u));
+              return Array.from(existingMap.values());
+            });
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.DRAFTS_V2, JSON.stringify(draftsV2));
@@ -2227,6 +2249,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           range: "'08_분할결제_상세행_DB'!A1",
           data: serializeSplitsTo2D(transactions, false),
         },
+        {
+          op: 'write',
+          range: "'09_사용자_CM_마스터'!A1",
+          data: serializeUsersTo2D(users),
+        },
       ];
 
       try {
@@ -2267,8 +2294,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           actorName: currentUser ? `${currentUser.name} (${currentUser.role})` : 'SYSTEM',
           sourceLabel: `${GOOGLE_MASTER_SPREADSHEET_TITLE} (${scopeLabel})`,
           addedCount: rateTableRows.length + cardPromotions.length,
-          updatedCount: transactions.length,
-          summary: `[구글 시트 마스터 Push 완료] 05_요율표(${rateTableRows.length}행) · 06_프로모션(${cardPromotions.length}행) · 07_거래내역(${transactions.length}건) 실시간 반영`,
+          updatedCount: transactions.length + users.length,
+          summary: `[구글 시트 마스터 Push 완료] 05_요율표(${rateTableRows.length}행) · 06_프로모션(${cardPromotions.length}행) · 07_거래내역(${transactions.length}건) · 09_사용자_CM(${users.length}명) 실시간 반영`,
         },
         ...prev,
       ]);
@@ -2276,7 +2303,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pushToast({
         type: 'success',
         title: '구글 시트 통합 마스터 동기화(Push) 완료',
-        description: `05_요율표(${rateTableRows.length}행) · 06_프로모션(${cardPromotions.length}건) · 07_거래내역(${transactions.length}건) 데이터가 실제 시트 구조로 반영되었습니다.`,
+        description: `05_요율표(${rateTableRows.length}행) · 06_프로모션(${cardPromotions.length}건) · 07_거래내역(${transactions.length}건) · 09_사용자_CM(${users.length}명) 데이터가 시트에 저장되었습니다.`,
       });
 
       return {
@@ -2301,6 +2328,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       let rateUpdated = 0;
       let promoUpdated = 0;
+      let usersUpdated = 0;
 
       const res = await fetch('/api/gsheets/pull');
       if (res.ok) {
@@ -2319,6 +2347,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             promoUpdated = parsedPromos.promotions.length;
           }
         }
+        if (data.usersTsv) {
+          const parsedUsers = parseUsersFromTsv(data.usersTsv);
+          if (parsedUsers.users.length > 0) {
+            setUsers(parsedUsers.users as User[]);
+            usersUpdated = parsedUsers.users.length;
+          }
+        }
       }
 
       setLastMasterSheetSyncedAt(now);
@@ -2326,8 +2361,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       pushToast({
         type: 'success',
-        title: '시트 > 웹앱 조건 불러오기(Pull) 완료',
-        description: `05_요율표(${rateUpdated || rateTableRows.length}행) · 06_프로모션(${promoUpdated || cardPromotions.length}건) 조건이 웹앱에 반영되었습니다.`,
+        title: '시트 > 웹앱 조건 및 계정 불러오기(Pull) 완료',
+        description: `05_요율표(${rateUpdated || rateTableRows.length}행) · 06_프로모션(${promoUpdated || cardPromotions.length}건) · 09_사용자_CM(${usersUpdated || users.length}명) 정보가 웹앱에 반영되었습니다.`,
       });
 
       return {

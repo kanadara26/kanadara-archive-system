@@ -34,11 +34,18 @@ export default defineConfig({
               if (!fs.existsSync(mirrorDir)) {
                 fs.mkdirSync(mirrorDir, { recursive: true });
               }
-              const mirrorPath = path.join(mirrorDir, 'gsheets_live_mirror.json');
+              const mirrorPath = path.resolve(process.cwd(), 'public', 'gsheets_live_mirror.json');
+              let existingMirror: Record<string, unknown> = {};
+              if (fs.existsSync(mirrorPath)) {
+                try {
+                  existingMirror = JSON.parse(fs.readFileSync(mirrorPath, 'utf-8'));
+                } catch {}
+              }
               fs.writeFileSync(
                 mirrorPath,
                 JSON.stringify(
                   {
+                    ...existingMirror,
                     spreadsheetId: SPREADSHEET_ID,
                     updatedAt: new Date().toISOString(),
                     batchOps,
@@ -87,6 +94,7 @@ export default defineConfig({
           try {
             let rateTsv = '';
             let promoTsv = '';
+            let usersTsv = '';
             let cliMode = 'MIRROR_SYNC';
             try {
               rateTsv = execSync(
@@ -95,6 +103,10 @@ export default defineConfig({
               );
               promoTsv = execSync(
                 `gsheets readonly read ${SPREADSHEET_ID} "'06_카드사별_프로모션_마스터'!A1:S200"`,
+                { encoding: 'utf-8', stdio: 'pipe', timeout: 8000 }
+              );
+              usersTsv = execSync(
+                `gsheets readonly read ${SPREADSHEET_ID} "'09_사용자_CM_마스터'!A1:L200"`,
                 { encoding: 'utf-8', stdio: 'pipe', timeout: 8000 }
               );
               cliMode = 'LIVE_GSHEETS_CLI';
@@ -109,6 +121,9 @@ export default defineConfig({
                 const promoOp = ops.find((o: { range?: string }) =>
                   String(o.range || '').includes('06_카드사별_프로모션_마스터')
                 );
+                const usersOp = ops.find((o: { range?: string }) =>
+                  String(o.range || '').includes('09_사용자_CM_마스터')
+                );
                 if (rateOp?.data) {
                   rateTsv = rateOp.data
                     .map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t'))
@@ -116,6 +131,11 @@ export default defineConfig({
                 }
                 if (promoOp?.data) {
                   promoTsv = promoOp.data
+                    .map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t'))
+                    .join('\n');
+                }
+                if (usersOp?.data) {
+                  usersTsv = usersOp.data
                     .map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t'))
                     .join('\n');
                 }
@@ -130,6 +150,7 @@ export default defineConfig({
                 spreadsheetId: SPREADSHEET_ID,
                 rateTsv,
                 promoTsv,
+                usersTsv,
                 pulledAt: new Date().toISOString(),
               })
             );

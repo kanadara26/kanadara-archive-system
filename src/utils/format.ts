@@ -631,3 +631,75 @@ export function parseSheetTextToConditions(rawText: string): {
 
   return { ok: errors.length === 0 && rows.length > 0, rows, errors };
 }
+
+export function parseUsersFromTsv(rawTsv: string): {
+  users: Array<{
+    id: string;
+    role: 'ADMIN' | 'AG' | 'CM';
+    name: string;
+    loginId: string;
+    password?: string;
+    affiliation: string;
+    phone: string;
+    businessNumber?: string;
+    rrn?: string;
+    employeeId?: string;
+    isActive: boolean;
+    createdAt?: string;
+  }>;
+} {
+  const lines = rawTsv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const users: Array<{
+    id: string;
+    role: 'ADMIN' | 'AG' | 'CM';
+    name: string;
+    loginId: string;
+    password?: string;
+    affiliation: string;
+    phone: string;
+    businessNumber?: string;
+    rrn?: string;
+    employeeId?: string;
+    isActive: boolean;
+    createdAt?: string;
+  }> = [];
+
+  for (const line of lines) {
+    const cols = line.split('\t');
+    const first = (cols[0] || '').trim();
+    if (first === '사용자ID' || first.toLowerCase() === 'id') continue;
+    const id = first;
+    const roleRaw = (cols[1] || '').trim().toUpperCase();
+    const name = (cols[2] || '').trim();
+    const loginId = (cols[3] || '').trim();
+    if (!id || !name || !loginId) continue;
+    const role = (roleRaw === 'ADMIN' ? 'ADMIN' : roleRaw === 'AG' ? 'AG' : 'CM') as 'ADMIN' | 'AG' | 'CM';
+    const password = (cols[4] || 'password123').trim();
+    const affiliation = (cols[5] || '').trim();
+    const phone = (cols[6] || '').trim();
+    const businessNumber = (cols[7] || '').trim() || undefined;
+    const rrn = (cols[8] || '').trim() || undefined;
+    const employeeId = (cols[9] || '').trim() || undefined;
+    const activeStr = (cols[10] || '').trim().toUpperCase();
+    const isActive = activeStr !== 'N' && activeStr !== 'FALSE' && activeStr !== '0';
+    const createdAt = (cols[11] || '').trim() || undefined;
+
+    users.push({
+      id,
+      role,
+      name,
+      loginId,
+      password,
+      affiliation,
+      phone,
+      businessNumber,
+      rrn,
+      employeeId,
+      isActive,
+      createdAt,
+    });
+  }
+
+  return { users };
+}
+

@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import {
   CARD_COMPANIES,
   CardCompany,
+  CARD_LOGO_URLS,
   IdentifierType,
   PAYMENT_METHODS,
   PaymentMethod,
@@ -430,6 +431,7 @@ export const ApprovalRequestNewPage: React.FC = () => {
                       c.cardCompany === card &&
                       getConditionLifecycleStatus(c, systemReferenceDate) === 'ACTIVE_NOW'
                   ).length;
+                  const logoUrl = CARD_LOGO_URLS[card];
                   return (
                     <button
                       key={card}
@@ -441,6 +443,15 @@ export const ApprovalRequestNewPage: React.FC = () => {
                           : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                       }`}
                     >
+                      {logoUrl && (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white p-1 border border-slate-200 shadow-2xs mb-1.5">
+                          <img
+                            src={logoUrl}
+                            alt={`${card} 로고`}
+                            className="h-full w-full object-contain"
+                          />
+                        </div>
+                      )}
                       <span>{card}</span>
                       <span
                         className={`mt-0.5 text-[10px] ${
