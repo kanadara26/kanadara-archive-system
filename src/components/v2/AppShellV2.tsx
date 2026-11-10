@@ -19,7 +19,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
   const {
     currentUser,
     users,
-    switchUser,
+    quickSwitchUser,
     login,
     draftsV2,
     lastMasterSheetSyncedAt,
@@ -48,8 +48,8 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     navigate('/transactions');
   };
 
-  const adminUsers = users.filter((u) => u.role === 'ADMIN' && u.active);
-  const agUsers = users.filter((u) => u.role === 'AG' && u.active);
+  const adminUsers = users.filter((u) => u.role === 'ADMIN' && u.isActive);
+  const agUsers = users.filter((u) => u.role === 'AG' && u.isActive);
   const isAdmin = currentUser?.role === 'ADMIN';
 
   const handleDirectLogin = (e: React.FormEvent) => {
@@ -202,7 +202,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                         </p>
                         <p className="text-xs text-slate-500">
                           ID: <span className="font-mono font-semibold">{currentUser?.loginId}</span> ·{' '}
-                          {currentUser?.teamName || currentUser?.role}
+                          {currentUser?.affiliation || currentUser?.role}
                         </p>
                       </div>
                       <span
@@ -230,7 +230,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                             key={admin.id}
                             type="button"
                             onClick={() => {
-                              switchUser(admin.id);
+                              quickSwitchUser(admin.id);
                               setAccountMenuOpen(false);
                             }}
                             className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-colors ${
@@ -276,7 +276,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                             key={ag.id}
                             type="button"
                             onClick={() => {
-                              switchUser(ag.id);
+                              quickSwitchUser(ag.id);
                               setAccountMenuOpen(false);
                             }}
                             className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs font-bold transition-colors ${

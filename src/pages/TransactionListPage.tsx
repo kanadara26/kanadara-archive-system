@@ -1970,7 +1970,7 @@ export const TransactionListPage: React.FC = () => {
                                           onClick={() => {
                                             if (!inlineRejectReason.trim()) {
                                               pushToast({
-                                                type: 'warning',
+                                                type: 'error',
                                                 title: '반려 사유를 입력해 주세요',
                                                 description: '반려 상태 변경 시 사유 기록이 필요합니다.',
                                               });

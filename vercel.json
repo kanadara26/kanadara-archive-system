@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/((?!api/|logos/|gsheets_live_mirror\\.json).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

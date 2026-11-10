@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
-const SPREADSHEET_ID = '11F4aTuZRzbvsIClzjqGPYGoWE9Jt2oQ_CkVPl-m_urM';
+const SPREADSHEET_ID = '1fGq9OKWroDBovIlkvdrkYmDFZp-HTkeJem5sirv6vvs';
 
 export default defineConfig({
   plugins: [
