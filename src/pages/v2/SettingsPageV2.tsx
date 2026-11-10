@@ -1061,7 +1061,9 @@ function doGet(e) {
                   <li>
                     사용 중인 구글 스프레드시트 상단 메뉴에서 <strong>확장 프로그램 &gt; Apps Script</strong> 클릭
                   </li>
-                  <li>기존 내용을 지우고 아래 스크립트 코드를 붙여넣은 뒤 저장 (Ctrl+S)</li>
+                  <li>
+                    <strong>기존 Code.gs 코드는 절대 지우실 필요가 없습니다!</strong> 좌측 <strong>파일 추가(+) &gt; 스크립트</strong>를 눌러 <strong>Webhook.gs</strong> 파일을 새로 만들거나, 기존 <strong>Code.gs 파일의 맨 아래</strong>에 그대로 덧붙여 넣고 저장(Ctrl+S)하세요. (기존 시트 등록 버튼과 메뉴가 100% 그대로 유지됩니다)
+                  </li>
                   <li>
                     우측 상단 <strong>배포 &gt; 새 배포</strong> 클릭 &rarr; 유형: <strong>웹 앱</strong> &rarr; 액세스 권한: <strong>모든 사용자</strong> 선택 후 배포 클릭 &rarr; 생성된 웹 앱 URL을 위에 붙여넣기
                   </li>
