@@ -5,12 +5,15 @@ import { User } from '../../types';
 import { GOOGLE_SHEET_TABS } from '../../constants/googleSheetConfig';
 import {
   Check,
+  Copy,
   Download,
   Edit3,
   ExternalLink,
   FileSpreadsheet,
+  Globe,
   KeyRound,
   Layers,
+  Link2,
   Plus,
   RotateCcw,
   ShieldCheck,
@@ -38,8 +41,94 @@ export const SettingsPageV2: React.FC = () => {
     importRateTableRowsFromSheetTsv,
     setAppVersion,
     resetDemoData,
+    pushToast,
   } = useApp();
   const navigate = useNavigate();
+
+  const [gsheetsWebhookUrl, setGsheetsWebhookUrl] = useState<string>(() => {
+    return (
+      localStorage.getItem('kanadara_gsheets_webhook_url') ||
+      (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
+      ''
+    );
+  });
+  const [showWebhookGuide, setShowWebhookGuide] = useState<boolean>(false);
+  const [hasCopiedCode, setHasCopiedCode] = useState<boolean>(false);
+
+  const APPS_SCRIPT_SNIPPET = `function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ops = body.batchOps || [];
+    for (var i = 0; i < ops.length; i++) {
+      var op = ops[i];
+      if (op.op === 'write' && op.range && op.data) {
+        var clean = op.range.replace(/'/g, '');
+        var parts = clean.split('!');
+        var s = ss.getSheetByName(parts[0]);
+        if (!s) continue;
+        s.clearContents();
+        if (op.data.length > 0 && op.data[0].length > 0) {
+          s.getRange(1, 1, op.data.length, op.data[0].length).setValues(op.data);
+        }
+      } else if (op.op === 'clear' && op.range) {
+        var clean = op.range.replace(/'/g, '');
+        var parts = clean.split('!');
+        var s = ss.getSheetByName(parts[0]);
+        if (s) {
+          if (parts[1]) {
+            s.getRange(parts[1]).clearContent();
+          } else {
+            s.clearContents();
+          }
+        }
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, syncedAt: new Date().toISOString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ['05_요율표_마스터', '06_카드사별_프로모션_마스터', '07_거래내역_통합마스터', '08_분할결제_상세행_DB', '09_사용자_CM_마스터'];
+  var result = {};
+  for (var i = 0; i < sheets.length; i++) {
+    var s = ss.getSheetByName(sheets[i]);
+    result[sheets[i]] = s ? s.getDataRange().getValues() : [];
+  }
+  return ContentService.createTextOutput(JSON.stringify({ ok: true, data: result }))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
+  const handleCopySnippet = () => {
+    navigator.clipboard.writeText(APPS_SCRIPT_SNIPPET);
+    setHasCopiedCode(true);
+    pushToast({
+      type: 'info',
+      title: 'Google Apps Script 코드 복사 완료',
+      description: '구글 시트 확장 프로그램 > Apps Script에 붙여넣어 배포하세요.',
+    });
+    setTimeout(() => setHasCopiedCode(false), 3000);
+  };
+
+  const handleSaveWebhook = () => {
+    const trimmed = gsheetsWebhookUrl.trim();
+    localStorage.setItem('kanadara_gsheets_webhook_url', trimmed);
+    pushToast({
+      type: 'success',
+      title: trimmed ? '웹훅 URL 저장 완료' : '웹훅 연동 해제',
+      description: trimmed
+        ? '배포된 웹앱에서 구글 시트로 실시간 직접 쓰기(Push)가 활성화되었습니다.'
+        : '웹훅 URL이 삭제되었습니다.',
+    });
+    if (trimmed) {
+      pushAllMasterTabsToGoogleSheet('실시간 웹훅 연동 테스트');
+    }
+  };
 
   const isAdmin = currentUser?.role === 'ADMIN';
   const adminUser = useMemo(
@@ -909,6 +998,95 @@ export const SettingsPageV2: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* 구글 시트 실시간 양방향 연동 웹훅 (Vercel 배포 환경 즉시 연동) */}
+        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-blue-700" />
+                <h3 className="text-xs font-extrabold text-blue-900">
+                  구글 시트 실시간 양방향 연동 웹훅 (Google Apps Script Webhook)
+                </h3>
+                <span
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                    gsheetsWebhookUrl
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {gsheetsWebhookUrl ? '● 실시간 웹훅 연동 활성화' : '○ 웹훅 미등록 (로컬 미러)'}
+                </span>
+              </div>
+              <p className="text-[11px] text-blue-700/80 mt-0.5">
+                Vercel 등 외부 배포 환경에서 AG 계정 발급, CM 등록, 거래 승인 내역이 구글 시트에 1초 만에 실시간 기록되도록 지원합니다.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowWebhookGuide((prev) => !prev)}
+              className="text-xs font-bold text-blue-700 hover:text-blue-900 underline self-start sm:self-auto"
+            >
+              {showWebhookGuide ? '연동 가이드 닫기' : '1분 연동 가이드 및 코드 보기'}
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Link2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="url"
+                value={gsheetsWebhookUrl}
+                onChange={(e) => setGsheetsWebhookUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec (배포된 웹 앱 URL 붙여넣기)"
+                className="w-full rounded-lg border border-blue-200 bg-white py-2 pl-9 pr-3 text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveWebhook}
+              disabled={isSyncingMasterSheet}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-blue-700 shrink-0 transition-colors"
+            >
+              저장 및 시트 즉시 전송
+            </button>
+          </div>
+
+          {showWebhookGuide && (
+            <div className="rounded-lg border border-blue-200 bg-white p-3.5 space-y-3 text-xs text-slate-700">
+              <div className="space-y-1.5 leading-relaxed">
+                <p className="font-extrabold text-slate-900">간단한 3단계 연동 방법:</p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-600">
+                  <li>
+                    사용 중인 구글 스프레드시트 상단 메뉴에서 <strong>확장 프로그램 &gt; Apps Script</strong> 클릭
+                  </li>
+                  <li>기존 내용을 지우고 아래 스크립트 코드를 붙여넣은 뒤 저장 (Ctrl+S)</li>
+                  <li>
+                    우측 상단 <strong>배포 &gt; 새 배포</strong> 클릭 &rarr; 유형: <strong>웹 앱</strong> &rarr; 액세스 권한: <strong>모든 사용자</strong> 선택 후 배포 클릭 &rarr; 생성된 웹 앱 URL을 위에 붙여넣기
+                  </li>
+                </ol>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900">Apps Script 코드:</span>
+                  <button
+                    type="button"
+                    onClick={handleCopySnippet}
+                    className="inline-flex items-center gap-1 rounded bg-slate-900 px-2 py-1 text-[11px] font-bold text-white hover:bg-slate-800"
+                  >
+                    {hasCopiedCode ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    <span>{hasCopiedCode ? '복사됨' : '코드 원클릭 복사'}</span>
+                  </button>
+                </div>
+                <pre className="max-h-40 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-2 text-[10px] font-mono text-slate-800 leading-normal">
+                  {APPS_SCRIPT_SNIPPET}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* =================================================================== */}

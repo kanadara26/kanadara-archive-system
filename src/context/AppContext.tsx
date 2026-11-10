@@ -363,6 +363,21 @@ function buildCmSnapshotFromUser(cmUser: User): CmProfileSnapshot {
   };
 }
 
+const DUMMY_CLEAN_FLAG = 'kanadara_v2_clean_dummy_20261110';
+if (typeof window !== 'undefined') {
+  try {
+    if (!localStorage.getItem(DUMMY_CLEAN_FLAG)) {
+      localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
+      localStorage.removeItem(STORAGE_KEYS.USERS);
+      localStorage.removeItem(STORAGE_KEYS.ASSIGNMENTS);
+      localStorage.removeItem(STORAGE_KEYS.RATE_ROWS);
+      localStorage.setItem(DUMMY_CLEAN_FLAG, 'true');
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [appVersion, setAppVersionState] = useState<'v1' | 'v2'>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.APP_VERSION);
@@ -469,17 +484,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
 
-        // 09_사용자_CM_마스터 실시간 동기화
+        // 09_사용자_CM_마스터 실시간 동기화 (구글 시트가 단일 진실 공급원)
         const userOp = ops.find((o) => String(o.range || '').includes('09_사용자_CM_마스터'));
         if (userOp && userOp.data && userOp.data.length > 1) {
           const parsed = parseUsersFrom2D(userOp.data);
           if (parsed.length > 0) {
-            setUsers((prev) => {
-              const existingMap = new Map(prev.map((u) => [u.id, u]));
-              // 시트에 등록된 최신 사용자 정보 병합
-              parsed.forEach((u) => existingMap.set(u.id, u));
-              return Array.from(existingMap.values());
-            });
+            setUsers(parsed);
           }
         }
       })
@@ -2273,10 +2283,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             data: serializeUsersTo2D(users),
           },
         ];
+        const webhookUrl =
+          localStorage.getItem('kanadara_gsheets_webhook_url') ||
+          (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
+          '';
+        if (webhookUrl) {
+          try {
+            await fetch(webhookUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ batchOps, spreadsheetId: GOOGLE_MASTER_SPREADSHEET_ID }),
+            });
+          } catch {}
+        }
         await fetch('/api/gsheets/push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchOps }),
+          body: JSON.stringify({ batchOps, webhookUrl }),
         });
       } catch {
         // Ignore network errors in static/offline environments
@@ -2328,11 +2352,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
       ];
 
+      const webhookUrl =
+        localStorage.getItem('kanadara_gsheets_webhook_url') ||
+        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
+        '';
+
+      if (webhookUrl) {
+        try {
+          await fetch(webhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batchOps, spreadsheetId: GOOGLE_MASTER_SPREADSHEET_ID }),
+          });
+        } catch {}
+      }
+
       try {
         await fetch('/api/gsheets/push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchOps }),
+          body: JSON.stringify({ batchOps, webhookUrl }),
         });
       } catch {
         // Offline or static fallback
@@ -2464,16 +2504,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (data.usersTsv) {
           const parsedUsers = parseUsersFromTsv(data.usersTsv);
           if (parsedUsers.users.length > 0) {
-            setUsers((prev) => {
-              const map = new Map<string, User>();
-              parsedUsers.users.forEach((u) => map.set(u.id, u as User));
-              prev.forEach((u) => {
-                if (!map.has(u.id)) {
-                  map.set(u.id, u);
-                }
-              });
-              return Array.from(map.values());
-            });
+            setUsers(parsedUsers.users as User[]);
             usersUpdated = parsedUsers.users.length;
           }
         }

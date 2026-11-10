@@ -22,7 +22,10 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     try {
       const parsed = JSON.parse(body || '{}');
       const batchOps = parsed.batchOps || [];
-      const webhookUrl = process.env.GSHEETS_WEBHOOK_URL || process.env.VITE_GSHEETS_WEBHOOK_URL;
+      const webhookUrl =
+        parsed.webhookUrl ||
+        process.env.GSHEETS_WEBHOOK_URL ||
+        process.env.VITE_GSHEETS_WEBHOOK_URL;
       let mode = 'MIRROR_FALLBACK';
 
       // 1. If Google Apps Script Webhook URL is configured, forward batchOps directly to Google Sheets
