@@ -6,7 +6,6 @@ import {
   FilePlus2,
   Calculator,
   Settings,
-  Layers,
   CheckCircle2,
   ShieldCheck,
   UserCheck,
@@ -25,7 +24,6 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     logout,
     draftsV2,
     lastMasterSheetSyncedAt,
-    setAppVersion,
   } = useApp();
   const navigate = useNavigate();
 
@@ -45,11 +43,6 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSwitchToV1 = () => {
-    setAppVersion('v1');
-    navigate('/transactions');
-  };
-
   const adminUsers = users.filter((u) => u.role === 'ADMIN' && u.isActive);
   const agUsers = users.filter((u) => u.role === 'AG' && u.isActive);
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -68,26 +61,26 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const navItems = [
     {
-      to: '/v2/dashboard',
+      to: '/dashboard',
       label: '대시보드',
       shortLabel: '대시보드',
       icon: LayoutDashboard,
     },
     {
-      to: '/v2/register',
+      to: '/register',
       label: '거래 승인건 등록',
       shortLabel: '승인건 등록',
       icon: FilePlus2,
       badge: draftsV2.length > 0 ? draftsV2.length : undefined,
     },
     {
-      to: '/v2/settlements',
+      to: '/settlements',
       label: '월별 수수료 정산',
       shortLabel: '월별 정산',
       icon: Calculator,
     },
     {
-      to: '/v2/settings',
+      to: '/settings',
       label: '설정',
       shortLabel: '설정',
       icon: Settings,
@@ -351,16 +344,6 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                 </div>
               )}
             </div>
-
-            <button
-              type="button"
-              onClick={handleSwitchToV1}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-              title="기존 전체 기능 버전(Ver 1)으로 전환"
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Ver 1 보기</span>
-            </button>
           </div>
         </div>
       </header>

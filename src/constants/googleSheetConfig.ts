@@ -28,31 +28,7 @@ export const GOOGLE_SHEET_TABS = {
     id: 1057963902,
     title: '00_조건_요율_프로모션_등록',
     url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=1057963902`,
-    desc: 'GAS 버튼 원클릭으로 조건(01)·요율표(05)·프로모션(06)을 각각 등록하는 입력 콘솔',
-  },
-  CONDITION_MASTER: {
-    id: 0,
-    title: '01_거래조건_마스터',
-    url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=0`,
-    desc: '카드사·결제방법별 실행일자 버전 조건 테이블',
-  },
-  CODE_DROPDOWN: {
-    id: 1309771947,
-    title: '02_코드표_드롭다운',
-    url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=1309771947`,
-    desc: '카드사·결제수단·상태 표준 코드 정의',
-  },
-  SCHEDULE_BOARD: {
-    id: 257684152,
-    title: '03_카드사별_실행일정_보드',
-    url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=257684152`,
-    desc: '월 1~2회 카드사별 조건 변경 일정 보드',
-  },
-  AUDIT_LOG: {
-    id: 1258296979,
-    title: '04_동기화_감사로그',
-    url: `${GOOGLE_MASTER_SPREADSHEET_BASE_URL}#gid=1258296979`,
-    desc: '시트 ↔ 웹앱 동기화 실행 이력 로그',
+    desc: 'GAS 버튼 원클릭으로 조건·요율표(05)·프로모션(06)을 각각 등록하는 입력 콘솔',
   },
   RATE_TABLE_MASTER: {
     id: 584667537,
