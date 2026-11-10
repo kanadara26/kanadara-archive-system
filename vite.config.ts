@@ -60,9 +60,12 @@ export default defineConfig({
               try {
                 execSync(`gsheets mutate batch ${SPREADSHEET_ID} -f "${tmpFile}"`, {
                   stdio: 'pipe',
-                  timeout: 8000,
+                  timeout: 25000,
                 });
                 cliMode = 'LIVE_GSHEETS_CLI';
+                try {
+                  fs.unlinkSync(tmpFile);
+                } catch {}
               } catch {
                 // Fallback to mirror sync when daemon process does not hold interactive CLI token
                 cliMode = 'MIRROR_SYNC';

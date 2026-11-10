@@ -252,7 +252,13 @@ interface AppContextValue {
   // Google Sheet Master (05_요율표_마스터 / 06_프로모션_마스터 / 07_거래내역_통합마스터 / 08_분할결제_상세행_DB) 연동
   lastMasterSheetSyncedAt: string;
   isSyncingMasterSheet: boolean;
-  pushAllMasterTabsToGoogleSheet: (scopeLabel?: string) => Promise<ActionResult>;
+  pushAllMasterTabsToGoogleSheet: (
+    scopeLabel?: string,
+    explicitUsers?: User[],
+    explicitTransactions?: Transaction[],
+    explicitRateRows?: RateTableRowItem[],
+    explicitPromotions?: CardPromotionItem[]
+  ) => Promise<ActionResult>;
   pullRateAndPromotionsFromGoogleSheet: (silent?: boolean) => Promise<ActionResult>;
   importRateTableRowsFromSheetTsv: (
     rawTsv: string,
@@ -1880,26 +1886,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (input.id) {
       let updatedUserRef: User | null = null;
-      setUsers((prev) =>
-        prev.map((u) => {
-          if (u.id !== input.id) return u;
-          const nextUser: User = {
-            ...u,
-            loginId: resolvedLoginId,
-            name: input.name.trim(),
-            role: input.role,
-            affiliation: resolvedAffiliation,
-            phone: input.phone.trim(),
-            rrn: input.rrn?.trim() || u.rrn,
-            businessNumber: input.businessNumber?.trim() || u.businessNumber,
-            employeeId: input.employeeId?.trim() || u.employeeId,
-            isActive: input.isActive,
-            password: input.password?.trim() ? input.password.trim() : u.password,
-          };
-          updatedUserRef = nextUser;
-          return nextUser;
-        })
-      );
+      const nextUsers = users.map((u) => {
+        if (u.id !== input.id) return u;
+        const nextUser: User = {
+          ...u,
+          loginId: resolvedLoginId,
+          name: input.name.trim(),
+          role: input.role,
+          affiliation: resolvedAffiliation,
+          phone: input.phone.trim(),
+          rrn: input.rrn?.trim() || u.rrn,
+          businessNumber: input.businessNumber?.trim() || u.businessNumber,
+          employeeId: input.employeeId?.trim() || u.employeeId,
+          isActive: input.isActive,
+          password: input.password?.trim() ? input.password.trim() : u.password,
+        };
+        updatedUserRef = nextUser;
+        return nextUser;
+      });
+      setUsers(nextUsers);
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
+      pushAllMasterTabsToGoogleSheet(`${input.role} 정보 수정`, nextUsers);
 
       // CM 기본정보가 수정되면 해당 CM의 거래 내역 cmProfile도 최신 등록 정보로 동기화
       if (updatedUserRef && (updatedUserRef as User).role === 'CM') {
@@ -1911,10 +1918,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       pushToast({
         type: 'success',
-        title: 'CM 정보가 저장되었습니다',
+        title: `${input.role} 정보가 저장되었습니다`,
         description: `${input.name} (${resolvedAffiliation}) 정보가 갱신되었습니다.`,
       });
-      return { ok: true, message: 'CM 정보가 수정되었습니다.' };
+      return { ok: true, message: `${input.role} 정보가 수정되었습니다.` };
     } else {
       const newId = `usr-${input.role.toLowerCase()}-${Date.now()}`;
       const newUser: User = {
@@ -1934,7 +1941,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isActive: input.isActive,
         createdAt: nowFormatted(),
       };
-      setUsers((prev) => [...prev, newUser]);
+      const nextUsers = [...users, newUser];
+      setUsers(nextUsers);
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
+      pushAllMasterTabsToGoogleSheet(`신규 ${input.role} 등록`, nextUsers);
 
       if (input.role === 'CM' && currentUser.role === 'AG') {
         setAssignments((prev) => [
@@ -1975,7 +1985,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { ok: false, message: '관리자(ADMIN) 계정은 삭제할 수 없습니다.' };
     }
 
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    const nextUsers = users.filter((u) => u.id !== userId);
+    setUsers(nextUsers);
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
     setAssignments((prev) =>
       prev.filter((a) => a.agId !== userId && a.cmId !== userId)
     );
@@ -1983,6 +1995,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUserId === userId) {
       setCurrentUserId(currentUser.id);
     }
+
+    pushAllMasterTabsToGoogleSheet('사용자 계정 삭제', nextUsers);
 
     pushToast({
       type: 'info',
@@ -2253,6 +2267,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             range: "'08_분할결제_상세행_DB'!A1",
             data: serializeSplitsTo2D(transactions, false),
           },
+          {
+            op: 'write',
+            range: "'09_사용자_CM_마스터'!A1",
+            data: serializeUsersTo2D(users),
+          },
         ];
         await fetch('/api/gsheets/push', {
           method: 'POST',
@@ -2267,36 +2286,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [rateTableRows, cardPromotions, transactions, users]);
 
   const pushAllMasterTabsToGoogleSheet = async (
-    scopeLabel = '통합 마스터시트 4개 탭 전체'
+    scopeLabel = '통합 마스터시트 5개 탭 전체',
+    explicitUsers?: User[],
+    explicitTransactions?: Transaction[],
+    explicitRateRows?: RateTableRowItem[],
+    explicitPromotions?: CardPromotionItem[]
   ): Promise<ActionResult> => {
     setIsSyncingMasterSheet(true);
     const now = nowFormatted();
+    const targetUsers = explicitUsers ?? users;
+    const targetTransactions = explicitTransactions ?? transactions;
+    const targetRates = explicitRateRows ?? rateTableRows;
+    const targetPromos = explicitPromotions ?? cardPromotions;
+
     try {
       const batchOps = [
         {
           op: 'write',
           range: "'05_요율표_마스터'!A1",
-          data: serializeRateTableTo2D(rateTableRows),
+          data: serializeRateTableTo2D(targetRates),
         },
         {
           op: 'write',
           range: "'06_카드사별_프로모션_마스터'!A1",
-          data: serializePromotionsTo2D(cardPromotions),
+          data: serializePromotionsTo2D(targetPromos),
         },
         {
           op: 'write',
           range: "'07_거래내역_통합마스터'!A1",
-          data: serializeTransactionsTo2D(transactions, users, false),
+          data: serializeTransactionsTo2D(targetTransactions, targetUsers, false),
         },
         {
           op: 'write',
           range: "'08_분할결제_상세행_DB'!A1",
-          data: serializeSplitsTo2D(transactions, false),
+          data: serializeSplitsTo2D(targetTransactions, false),
         },
         {
           op: 'write',
           range: "'09_사용자_CM_마스터'!A1",
-          data: serializeUsersTo2D(users),
+          data: serializeUsersTo2D(targetUsers),
         },
       ];
 
@@ -2436,7 +2464,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (data.usersTsv) {
           const parsedUsers = parseUsersFromTsv(data.usersTsv);
           if (parsedUsers.users.length > 0) {
-            setUsers(parsedUsers.users as User[]);
+            setUsers((prev) => {
+              const map = new Map<string, User>();
+              parsedUsers.users.forEach((u) => map.set(u.id, u as User));
+              prev.forEach((u) => {
+                if (!map.has(u.id)) {
+                  map.set(u.id, u);
+                }
+              });
+              return Array.from(map.values());
+            });
             usersUpdated = parsedUsers.users.length;
           }
         }

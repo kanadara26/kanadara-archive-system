@@ -106,7 +106,6 @@ export const SettingsPageV2: React.FC = () => {
     });
     if (res.ok) {
       handleResetAgForm();
-      pushAllMasterTabsToGoogleSheet('AG 계정 등록/수정');
     }
   };
 
@@ -122,7 +121,6 @@ export const SettingsPageV2: React.FC = () => {
       phone: ag.phone,
       isActive: !ag.isActive,
     });
-    pushAllMasterTabsToGoogleSheet('AG 계정 활성상태 변경');
   };
 
   // =========================================================================
@@ -200,7 +198,6 @@ export const SettingsPageV2: React.FC = () => {
     });
     if (res.ok) {
       handleResetCmForm();
-      pushAllMasterTabsToGoogleSheet('CM 계정 등록/수정');
     }
   };
 
@@ -217,7 +214,6 @@ export const SettingsPageV2: React.FC = () => {
       employeeId: cm.employeeId,
       isActive: !cm.isActive,
     });
-    pushAllMasterTabsToGoogleSheet('CM 계정 활성상태 변경');
   };
 
   return (
@@ -485,7 +481,6 @@ export const SettingsPageV2: React.FC = () => {
                               deleteUserAccount(ag.id);
                               setConfirmDeleteUserId(null);
                               if (editingAgId === ag.id) handleResetAgForm();
-                              pushAllMasterTabsToGoogleSheet('AG 계정 삭제');
                             }}
                             className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
                           >
@@ -740,7 +735,6 @@ export const SettingsPageV2: React.FC = () => {
                               deleteUserAccount(cm.id);
                               setConfirmDeleteUserId(null);
                               if (editingCmId === cm.id) handleResetCmForm();
-                              pushAllMasterTabsToGoogleSheet('CM 계정 삭제');
                             }}
                             className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-extrabold text-white hover:bg-rose-700"
                           >
