@@ -55,6 +55,9 @@ const call = async (handler, { method = 'GET', body, cookie } = {}) => {
   return r;
 };
 const users = () => sheet['09_사용자_CM_마스터'];
+// 실제 클라이언트처럼 방금 불러온 탭 버전을 함께 보냄
+const pushAs = async (cookie, body) =>
+  call(push, { method: 'POST', cookie, body: { baseVersions: (await call(pull, { cookie })).body.versions, ...body } });
 const pwOf = (id) => users().find((r) => r[0] === id)?.[4];
 
 // 1) 로그인
@@ -77,35 +80,73 @@ assert.equal((await call(pull, { cookie: adm.cookie.replace(/.$/, (c) => (c === 
 // 3) push(ADMIN): 빈 비밀번호는 유지, 입력한 비밀번호는 변경
 const u = p.body.data['09_사용자_CM_마스터'];
 const w = (data, tab = '09_사용자_CM_마스터', op = 'write') => ({ batchOps: [{ op, range: `'${tab}'!A1`, data }] });
-assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: w(u) })).status, 200);
+assert.equal((await pushAs(adm.cookie, w(u))).status, 200);
 assert.equal(pwOf('adm'), 'Admin#Pass1');
 assert.equal(pwOf('ag1'), 'AgPass#123');
 const withNewPw = u.map((r) => (r[0] === 'ag1' ? r.map((c, j) => (j === 4 ? 'NewAg#Pass1' : c)) : r));
-assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: w(withNewPw) })).status, 200);
+assert.equal((await pushAs(adm.cookie, w(withNewPw))).status, 200);
 assert.equal(pwOf('ag1'), 'NewAg#Pass1');
 
 // 4) 허용되지 않은 탭/명령 차단
-assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: w([['x']], '00_조건_요율_프로모션_등록') })).status, 400);
-assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: w([], '05_요율표_마스터', 'clear') })).status, 400);
+assert.equal((await pushAs(adm.cookie, w([['x']], '00_조건_요율_프로모션_등록'))).status, 400);
+assert.equal((await pushAs(adm.cookie, w([], '05_요율표_마스터', 'clear'))).status, 400);
 
 // 5) AG: CM 추가는 가능, ADMIN/AG 변경·권한상승은 불가
 const ag = await call(login, { method: 'POST', body: { loginId: 'ag', password: 'NewAg#Pass1' } });
 assert.equal(ag.status, 200);
 const agView = (await call(pull, { cookie: ag.cookie })).body.data['09_사용자_CM_마스터'];
-assert.equal((await call(push, { method: 'POST', cookie: ag.cookie, body: w([...agView, row('cm2', 'CM', 'cm2', 'Cm2#Pass12')]) })).status, 200);
+assert.equal((await pushAs(ag.cookie, w([...agView, row('cm2', 'CM', 'cm2', 'Cm2#Pass12')]))).status, 200);
 const escalate = agView.map((r) => (r[0] === 'ag1' ? r.map((c, j) => (j === 1 ? 'ADMIN' : c)) : r));
-assert.equal((await call(push, { method: 'POST', cookie: ag.cookie, body: w(escalate) })).status, 403, 'AG 권한상승 차단');
-assert.equal((await call(push, { method: 'POST', cookie: ag.cookie, body: w([...agView, row('x', 'ADMIN', 'x', 'X#Pass1234')]) })).status, 403);
-assert.equal((await call(push, { method: 'POST', cookie: ag.cookie, body: w(agView.filter((r) => r[0] !== 'adm')) })).status, 403, 'ADMIN 삭제 차단');
+assert.equal((await pushAs(ag.cookie, w(escalate))).status, 403, 'AG 권한상승 차단');
+assert.equal((await pushAs(ag.cookie, w([...agView, row('x', 'ADMIN', 'x', 'X#Pass1234')]))).status, 403);
+assert.equal((await pushAs(ag.cookie, w(agView.filter((r) => r[0] !== 'adm')))).status, 403, 'ADMIN 삭제 차단');
 assert.equal(users().find((r) => r[0] === 'ag1')[1], 'AG');
 
 // 6) 관리자가 AG를 비활성화하면 기존 AG 세션도 즉시 무효
 const deactivated = (await call(pull, { cookie: adm.cookie })).body.data['09_사용자_CM_마스터']
   .map((r) => (r[0] === 'ag1' ? r.map((c, j) => (j === 10 ? 'N' : c)) : r));
-assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: w(deactivated) })).status, 200);
+assert.equal((await pushAs(adm.cookie, w(deactivated))).status, 200);
 assert.equal((await call(pull, { cookie: ag.cookie })).status, 401);
 
-// 7) 로그아웃 쿠키 삭제, 설정 누락 시 거부, 웹훅 토큰 불일치는 실패로 전달
+// 7) 동시 수정: 05/06/09는 버전이 다르면 409, 07/08은 거래 단위 병합
+const fresh = await call(pull, { cookie: adm.cookie });
+const v0 = fresh.body.versions;
+assert.ok(v0['05_요율표_마스터'], 'pull이 탭 버전을 줘야 함');
+const rates = [['요율행ID'], ['R1']];
+const r1 = await call(push, { method: 'POST', cookie: adm.cookie, body: { ...w(rates, '05_요율표_마스터'), baseVersions: v0 } });
+assert.equal(r1.status, 200);
+// 저장 직후 받은 버전으로 다시 저장 → 자기 저장과 충돌하면 안 됨
+const rates2 = [['요율행ID'], ['R1'], ['R2']];
+const r2 = await call(push, { method: 'POST', cookie: adm.cookie, body: { ...w(rates2, '05_요율표_마스터'), baseVersions: r1.body.versions } });
+assert.equal(r2.status, 200, '방금 받은 버전으로는 충돌 없이 저장');
+sheet['05_요율표_마스터'].push(['R-콘솔등록']); // 시트 콘솔(Code.gs)에서 직접 추가
+const r3 = await call(push, { method: 'POST', cookie: adm.cookie, body: { ...w([['요율행ID'], ['R1']], '05_요율표_마스터'), baseVersions: r2.body.versions } });
+assert.equal(r3.status, 409, '시트에서 바뀐 탭은 덮어쓰지 않음');
+assert.ok(sheet['05_요율표_마스터'].some((r) => r[0] === 'R-콘솔등록'), '콘솔 등록 행 보존');
+assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: { ...w(rates, '05_요율표_마스터') } })).status, 409, '버전 없으면 거부');
+
+const J = '웹앱원본데이터(JSON)';
+const tx = (id, updatedAt, note = '') => [id, JSON.stringify({ id, updatedAt, note })];
+const sp = (id) => [`${id}-s1`, id];
+const tw = (r07, r08, baseTxIds) => ({ baseTxIds, batchOps: [
+  { op: 'write', range: "'07_거래내역_통합마스터'!A1", data: [['거래ID', J], ...r07] },
+  { op: 'write', range: "'08_분할결제_상세행_DB'!A1", data: [['분할행ID', '거래ID'], ...r08] },
+] });
+// 시트 현재: A(다른 사용자가 11:00에 수정), B, D(다른 사용자가 새로 추가). E는 다른 사용자가 이미 삭제.
+sheet['07_거래내역_통합마스터'] = [['거래ID', J], tx('A', '2026-11-11 11:00', 'theirs'), tx('B', '2026-11-11 09:00'), tx('D', '2026-11-11 10:30')];
+sheet['08_분할결제_상세행_DB'] = [['분할행ID', '거래ID'], sp('A'), sp('B'), sp('D')];
+// 나: A,B,E를 불러온 상태에서 A를 10:00에 수정, B 삭제, C 추가
+const m = await call(push, { method: 'POST', cookie: adm.cookie,
+  body: tw([tx('A', '2026-11-11 10:00', 'mine'), tx('E', '2026-11-11 08:00'), tx('C', '2026-11-11 10:45')], [sp('A'), sp('E'), sp('C')], ['A', 'B', 'E']) });
+assert.equal(m.status, 200);
+const ids07 = sheet['07_거래내역_통합마스터'].slice(1).map((r) => r[0]).sort();
+assert.deepEqual(ids07, ['A', 'C', 'D'], 'B 삭제·E 부활 안 함·C 추가·D 유지');
+assert.match(sheet['07_거래내역_통합마스터'].find((r) => r[0] === 'A')[1], /theirs/, '더 최근 수정본 유지');
+assert.deepEqual(sheet['08_분할결제_상세행_DB'].slice(1).map((r) => r[1]).sort(), ['A', 'C', 'D'], '08도 같이 맞춰짐');
+assert.ok(sheet['07_거래내역_통합마스터'].every((r) => r.length === 2), '행 너비 통일');
+assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: { batchOps: [tw([], [], []).batchOps[0]] } })).status, 400, '07만 단독 저장 불가');
+
+// 8) 로그아웃 쿠키 삭제, 설정 누락 시 거부, 웹훅 토큰 불일치는 실패로 전달
 assert.match(String((await call(logout, { method: 'POST' })).headers['set-cookie']), /Max-Age=0/);
 process.env.GSHEETS_WEBHOOK_TOKEN = 'wrong-token';
 assert.equal((await call(login, { method: 'POST', body: { loginId: 'admin', password: 'Admin#Pass1' } })).status, 502);

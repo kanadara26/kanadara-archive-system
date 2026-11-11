@@ -30,6 +30,15 @@ export const WRITABLE_TABS = [
 ];
 export type SheetTabs = Record<string, string[][]>;
 
+// 탭 내용의 지문. 클라이언트가 불러온 시점과 지금 시트가 같은지 비교하는 데 사용.
+export function tabVersion(rows: string[][] = []): string {
+  return createHash('sha256').update(JSON.stringify(rows)).digest('hex').slice(0, 16);
+}
+
+export function tabVersions(tabs: SheetTabs): Record<string, string> {
+  return Object.fromEntries(WRITABLE_TABS.map((t) => [t, tabVersion(tabs[t])]));
+}
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);

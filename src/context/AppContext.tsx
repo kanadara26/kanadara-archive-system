@@ -318,6 +318,8 @@ try {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
+const sheetTabOf = (range: string) => range.replace(/'/g, '').split('!')[0];
+
 function loadStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -443,10 +445,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 서버 세션 기준 실제 로그인 계정 (화면상 계정 전환과 별개)
   const [sessionUser, setSessionUser] = useState<{ id: string; role: string } | null>(null);
   const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
-  const lastPushedKeyRef = useRef<string>('');
+  // 마지막으로 시트와 맞춰진 탭별 내용 / 서버가 준 탭 버전 / 시트에 있다고 알고 있는 거래 ID
+  const lastPushedTabsRef = useRef<Record<string, string>>({});
+  const baseVersionsRef = useRef<Record<string, string>>({});
+  const baseTxIdsRef = useRef<string[]>([]);
+  // 저장·불러오기를 한 줄로 세워 서로 겹치지 않게 함 (겹치면 자기 저장에 버전 충돌이 남)
+  const sheetQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueSheetTask = <T,>(task: () => Promise<T>): Promise<T> => {
+    const p = sheetQueueRef.current.then(task, task);
+    sheetQueueRef.current = p.catch(() => {});
+    return p;
+  };
 
   // 구글 시트 → 웹앱 전체 로드. 실패하면 예외를 던지고 isSheetReady는 그대로 둔다.
-  const loadFromSheet = async (): Promise<{ rates: number; promos: number; txs: number; users: number }> => {
+  const loadFromSheet = () => enqueueSheetTask(loadFromSheetNow);
+  const loadFromSheetNow = async (): Promise<{ rates: number; promos: number; txs: number; users: number }> => {
     const res = await fetch('/api/gsheets/pull');
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.ok) {
@@ -488,28 +501,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSessionUser(me);
     // ADMIN만 화면상 다른 계정으로 전환해 둔 상태를 유지할 수 있음
     setCurrentUserId((prev) => (me.role === 'ADMIN' && prev ? prev : me.id));
-    lastPushedKeyRef.current = JSON.stringify(
-      buildMasterBatchOps(nextRates, nextPromos, nextTxs, nextUsers)
+    lastPushedTabsRef.current = Object.fromEntries(
+      buildMasterBatchOps(nextRates, nextPromos, nextTxs, nextUsers).map((o) => [
+        sheetTabOf(o.range),
+        JSON.stringify(o.data),
+      ])
     );
+    baseVersionsRef.current = (json.versions as Record<string, string>) || {};
+    baseTxIdsRef.current = nextTxs.map((t) => t.id);
     setIsSheetReady(true);
     return { rates: nextRates.length, promos: nextPromos.length, txs: nextTxs.length, users: nextUsers.length };
   };
 
-  const pushBatchToSheet = async (batchOps: ReturnType<typeof buildMasterBatchOps>) => {
-    const res = await fetch('/api/gsheets/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchOps }),
+  // 시트와 달라진 탭만 저장. 반환값: 실제로 저장한 탭 이름들.
+  // 거래(07/08)는 서버가 거래 단위로 병합하므로 먼저 따로 보내고, 05/06/09는 버전 확인 후 저장.
+  const syncToSheet = (
+    rates: RateTableRowItem[],
+    promos: CardPromotionItem[],
+    txs: Transaction[],
+    usersToSave: User[]
+  ) =>
+    enqueueSheetTask(async (): Promise<string[]> => {
+      const ops = buildMasterBatchOps(rates, promos, txs, usersToSave);
+      const changed = new Set(
+        ops
+          .filter((o) => JSON.stringify(o.data) !== lastPushedTabsRef.current[sheetTabOf(o.range)])
+          .map((o) => sheetTabOf(o.range))
+      );
+      const txTabs = [GOOGLE_SHEET_TABS.TRANSACTION_MASTER.title, GOOGLE_SHEET_TABS.SPLIT_PAYMENT_DB.title];
+      const txChanged = txTabs.some((t) => changed.has(t));
+      const groups = [
+        txChanged ? ops.filter((o) => txTabs.includes(sheetTabOf(o.range) as (typeof txTabs)[number])) : [],
+        ops.filter((o) => changed.has(sheetTabOf(o.range)) && !txTabs.includes(sheetTabOf(o.range) as (typeof txTabs)[number])),
+      ].filter((g) => g.length > 0);
+
+      const saved: string[] = [];
+      for (const batchOps of groups) {
+        const res = await fetch('/api/gsheets/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            batchOps,
+            baseVersions: baseVersionsRef.current,
+            baseTxIds: baseTxIdsRef.current,
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (res.status === 401) {
+          setIsSheetReady(false);
+          setCurrentUserId(null);
+        }
+        if (!res.ok || !json?.ok) {
+          throw Object.assign(new Error(json?.error || `시트 저장 실패 (HTTP ${res.status})`), {
+            status: res.status,
+          });
+        }
+        for (const o of batchOps) {
+          lastPushedTabsRef.current[sheetTabOf(o.range)] = JSON.stringify(o.data);
+          saved.push(sheetTabOf(o.range));
+        }
+        if (json.versions) baseVersionsRef.current = json.versions;
+        if (batchOps.some((o) => txTabs.includes(sheetTabOf(o.range) as (typeof txTabs)[number]))) {
+          baseTxIdsRef.current = txs.map((t) => t.id);
+        }
+      }
+      return saved;
     });
-    const json = await res.json().catch(() => null);
-    if (res.status === 401) {
-      setIsSheetReady(false);
-      setCurrentUserId(null);
+
+  // 409 = 불러온 뒤 시트(콘솔·다른 사용자)가 먼저 바뀜 → 덮어쓰지 않고 최신 시트로 다시 맞춤
+  const handleSyncError = (err: unknown, title: string): string => {
+    const message = err instanceof Error ? err.message : String(err);
+    if ((err as { status?: number }).status === 409) {
+      pushToast({
+        type: 'error',
+        title: '시트가 다른 곳에서 먼저 변경됨',
+        description: `${message} 방금 바꾼 내용은 저장되지 않았습니다. 최신 시트를 다시 불러왔으니 확인 후 다시 입력해 주세요.`,
+      });
+      loadFromSheet().catch(() => {});
+    } else {
+      pushToast({ type: 'error', title, description: message });
     }
-    if (!res.ok || !json?.ok) {
-      throw new Error(json?.error || `시트 저장 실패 (HTTP ${res.status})`);
-    }
-    lastPushedKeyRef.current = JSON.stringify(batchOps);
+    return message;
   };
 
   useEffect(() => {
@@ -2281,18 +2353,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 웹앱 데이터 변경 시 구글 시트에 자동 저장. 시트 로드 전에는 절대 쓰지 않고, 바뀐 게 없으면 건너뜀.
   useEffect(() => {
     if (!isSheetReady) return;
-    const timer = window.setTimeout(async () => {
-      const batchOps = buildMasterBatchOps(rateTableRows, cardPromotions, transactions, users);
-      if (JSON.stringify(batchOps) === lastPushedKeyRef.current) return;
-      try {
-        await pushBatchToSheet(batchOps);
-      } catch (err) {
-        pushToast({
-          type: 'error',
-          title: '구글 시트 자동 저장 실패',
-          description: err instanceof Error ? err.message : String(err),
-        });
-      }
+    const timer = window.setTimeout(() => {
+      syncToSheet(rateTableRows, cardPromotions, transactions, users).catch((err) =>
+        handleSyncError(err, '구글 시트 자동 저장 실패')
+      );
     }, 500);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2321,9 +2385,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetPromos = explicitPromotions ?? cardPromotions;
 
     try {
-      await pushBatchToSheet(
-        buildMasterBatchOps(targetRates, targetPromos, targetTransactions, targetUsers)
-      );
+      const saved = await syncToSheet(targetRates, targetPromos, targetTransactions, targetUsers);
+      if (saved.length === 0) {
+        pushToast({ type: 'info', title: '변경 사항 없음', description: '시트와 이미 같은 상태입니다.' });
+        return { ok: true, message: '변경 사항 없음' };
+      }
 
       // 거래내역의 시트 동기화 상태도 최신 마스터 시트 기준으로 갱신
       setTransactions((prev) =>
@@ -2362,7 +2428,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pushToast({
         type: 'success',
         title: '구글 시트 통합 마스터 동기화(Push) 완료',
-        description: `05_요율표(${rateTableRows.length}행) · 06_프로모션(${cardPromotions.length}건) · 07_거래내역(${transactions.length}건) · 09_사용자_CM(${users.length}명) 데이터가 시트에 저장되었습니다.`,
+        description: `저장한 탭: ${saved.join(', ')}`,
       });
 
       return {
@@ -2370,9 +2436,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: `구글 시트(${GOOGLE_MASTER_SPREADSHEET_ID}) 동기화 완료`,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      pushToast({ type: 'error', title: '구글 시트 저장 실패', description: message });
-      return { ok: false, message };
+      return { ok: false, message: handleSyncError(err, '구글 시트 저장 실패') };
     } finally {
       setIsSyncingMasterSheet(false);
     }
