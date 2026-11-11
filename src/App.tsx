@@ -32,6 +32,8 @@ const LoginRoute: React.FC = () => {
 };
 
 const AppRoutes: React.FC = () => {
+  const { isAuthReady } = useApp();
+  if (!isAuthReady) return null;
   return (
     <Routes>
       <Route path="/" element={<RootRedirect />} />

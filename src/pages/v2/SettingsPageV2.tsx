@@ -175,8 +175,14 @@ function doGet(e) {
     e.preventDefault();
     if (!isAdmin) return;
     const existing = editingAgId ? users.find((u) => u.id === editingAgId) : undefined;
-    if (agPassword.trim().length < 8) {
-      pushToast({ type: 'error', title: '비밀번호 확인', description: '비밀번호는 8자 이상 입력해 주세요.' });
+    // 수정 시 비워 두면 기존 비밀번호 유지 (서버가 시트 값을 보존)
+    const pw = agPassword.trim();
+    if ((!existing || pw) && pw.length < 8) {
+      pushToast({
+        type: 'error',
+        title: '비밀번호 확인',
+        description: existing ? '변경할 비밀번호는 8자 이상 입력해 주세요. (유지하려면 비워 두세요)' : '비밀번호는 8자 이상 입력해 주세요.',
+      });
       return;
     }
     const res = saveUserAccount({

@@ -685,7 +685,7 @@ export function parseUsersFrom2D(rows: (string | number)[][]): User[] {
     const loginId = String(r[3] || '').trim();
     if (!id || !name || !loginId) continue;
     const role = (roleRaw === 'ADMIN' ? 'ADMIN' : roleRaw === 'AG' ? 'AG' : 'CM') as User['role'];
-    const password = String(r[4] || 'password123').trim();
+    const password = String(r[4] || '').trim();
     const affiliation = String(r[5] || '').trim();
     const phone = String(r[6] || '').trim();
     const businessNumber = String(r[7] || '').trim() || undefined;

@@ -163,9 +163,10 @@ interface AppContextValue {
   dismissToast: (id: string) => void;
 
   // Auth
-  login: (loginId: string, password: string) => ActionResult;
+  login: (loginId: string, password: string) => Promise<ActionResult>;
+  isAuthReady: boolean;
   quickSwitchUser: (userId: string) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 
   // Access & relation helpers
   getUserById: (id: string) => User | undefined;
@@ -311,6 +312,7 @@ try {
     window.localStorage.removeItem('kanadara_v5_assignments');
     window.localStorage.removeItem('kanadara_v5_users');
     window.localStorage.removeItem('kanadara_gsheets_webhook_url');
+    window.localStorage.removeItem(STORAGE_KEYS.USERS);
   }
 } catch {}
 
@@ -384,17 +386,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = localStorage.getItem(STORAGE_KEYS.APP_VERSION);
     return saved === 'v1' ? 'v1' : 'v2';
   });
-  const [users, setUsers] = useState<User[]>(() => {
-    const stored = loadStorage(STORAGE_KEYS.USERS, INITIAL_USERS);
-    const existingIds = new Set(stored.map((u) => u.id));
-    // ADMIN 계정만 누락 시 복구하고, ADMIN이 삭제한 AG/CM 계정은 재초기화되지 않도록 유지
-    const missingAdminDefaults = INITIAL_USERS.filter(
-      (u) => u.role === 'ADMIN' && !existingIds.has(u.id)
-    );
-    return missingAdminDefaults.length > 0
-      ? [...missingAdminDefaults, ...stored]
-      : stored;
-  });
+  // 계정 목록은 로그인 후 시트(서버)에서만 받아오며 브라우저에 저장하지 않음 (비밀번호 제외)
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [assignments, setAssignments] = useState<AgCmAssignment[]>(() =>
     loadStorage(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS)
   );
@@ -447,6 +440,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 시트를 정상적으로 읽어온 뒤에만 시트 쓰기를 허용 (빈/구형 브라우저 상태로 시트를 덮어쓰는 사고 방지)
   const [isSheetReady, setIsSheetReady] = useState<boolean>(false);
+  // 서버 세션 기준 실제 로그인 계정 (화면상 계정 전환과 별개)
+  const [sessionUser, setSessionUser] = useState<{ id: string; role: string } | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const lastPushedKeyRef = useRef<string>('');
 
   // 구글 시트 → 웹앱 전체 로드. 실패하면 예외를 던지고 isSheetReady는 그대로 둔다.
@@ -454,8 +450,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch('/api/gsheets/pull');
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.ok) {
-      throw new Error(json?.error || `시트 읽기 실패 (HTTP ${res.status})`);
+      throw Object.assign(new Error(json?.error || `시트 읽기 실패 (HTTP ${res.status})`), {
+        status: res.status,
+      });
     }
+    const me = json.me as { id: string; role: string };
     const tabs = json.data as Record<string, unknown[][]>;
 
     const txResult = parseTransactionsFrom2D(tabs[GOOGLE_SHEET_TABS.TRANSACTION_MASTER.title] || []);
@@ -486,6 +485,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCardPromotions(nextPromos);
     setUsers(nextUsers);
     setTransactions(nextTxs);
+    setSessionUser(me);
+    // ADMIN만 화면상 다른 계정으로 전환해 둔 상태를 유지할 수 있음
+    setCurrentUserId((prev) => (me.role === 'ADMIN' && prev ? prev : me.id));
     lastPushedKeyRef.current = JSON.stringify(
       buildMasterBatchOps(nextRates, nextPromos, nextTxs, nextUsers)
     );
@@ -500,6 +502,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       body: JSON.stringify({ batchOps }),
     });
     const json = await res.json().catch(() => null);
+    if (res.status === 401) {
+      setIsSheetReady(false);
+      setCurrentUserId(null);
+    }
     if (!res.ok || !json?.ok) {
       throw new Error(json?.error || `시트 저장 실패 (HTTP ${res.status})`);
     }
@@ -507,13 +513,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    loadFromSheet().catch((err) => {
-      pushToast({
+    loadFromSheet()
+      .catch((err) => {
+        if ((err as { status?: number }).status === 401) {
+          setCurrentUserId(null);
+          return;
+        }
+        pushToast({
         type: 'error',
         title: '구글 시트 연결 실패 — 시트 저장 중지됨',
-        description: err instanceof Error ? err.message : String(err),
-      });
-    });
+          description: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => setIsAuthReady(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -521,9 +533,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.DRAFTS_V2, JSON.stringify(draftsV2));
   }, [draftsV2]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-  }, [users]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignments));
@@ -684,33 +693,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
   };
 
-  const login = (loginId: string, password: string): ActionResult => {
-    const trimmedId = loginId.trim().toLowerCase();
-    const matched = users.find(
-      (u) => !!u.password && u.loginId.toLowerCase() === trimmedId && u.password === password
-    );
-    if (!matched) {
-      return {
-        ok: false,
-        message: '아이디 또는 비밀번호가 일치하지 않습니다. 인증정보를 다시 확인해 주세요.',
-      };
+  const login = async (loginId: string, password: string): Promise<ActionResult> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginId: loginId.trim(), password }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        return { ok: false, message: json?.error || `로그인 실패 (HTTP ${res.status})` };
+      }
+      setCurrentUserId(null); // 이전 화면 전환 상태 초기화 → 로그인한 본인 계정으로
+      await loadFromSheet();
+      pushToast({
+        type: 'success',
+        title: `${json.user.name}님 환영합니다`,
+        description: `${json.user.role} 권한으로 접속했습니다.`,
+      });
+      return { ok: true, message: '로그인 성공' };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : '로그인 중 오류가 발생했습니다.' };
     }
-    if (!matched.isActive) {
-      return {
-        ok: false,
-        message: '비활성화된 계정입니다. 본사 운영 관리자에게 문의해 주세요.',
-      };
-    }
-    setCurrentUserId(matched.id);
-    pushToast({
-      type: 'success',
-      title: `${matched.name}님 환영합니다`,
-      description: `${matched.affiliation} (${matched.role}) 권한으로 접속했습니다.`,
-    });
-    return { ok: true, message: '로그인 성공' };
   };
 
   const quickSwitchUser = (userId: string) => {
+    if (sessionUser?.role !== 'ADMIN') {
+      pushToast({ type: 'error', title: '계정 전환 불가', description: '관리자(ADMIN)만 화면 계정 전환을 할 수 있습니다.' });
+      return;
+    }
     const target = users.find((u) => u.id === userId && u.isActive);
     if (!target) {
       pushToast({
@@ -728,13 +739,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const logout = () => {
-    setCurrentUserId(null);
-    pushToast({
-      type: 'info',
-      title: '로그아웃 완료',
-      description: '업무 세션이 안전하게 종료되었습니다.',
-    });
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    // 메모리에 남은 다른 계정의 데이터까지 비우기 위해 새로 로드
+    window.location.assign('/login');
   };
 
   // [신규 핵심] AG의 거래승인 요청 등록 및 수정 (거래정보 + CM 등록 데이터 자동 연동 + 분할 결제정보)
@@ -1936,7 +1945,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return nextUser;
       });
       setUsers(nextUsers);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
       pushAllMasterTabsToGoogleSheet(`${input.role} 정보 수정`, nextUsers);
 
       // CM 기본정보가 수정되면 해당 CM의 거래 내역 cmProfile도 최신 등록 정보로 동기화
@@ -1974,7 +1982,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       const nextUsers = [...users, newUser];
       setUsers(nextUsers);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
       pushAllMasterTabsToGoogleSheet(`신규 ${input.role} 등록`, nextUsers);
 
       if (input.role === 'CM' && currentUser.role === 'AG') {
@@ -2018,7 +2025,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nextUsers = users.filter((u) => u.id !== userId);
     setUsers(nextUsers);
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(nextUsers));
     setAssignments((prev) =>
       prev.filter((a) => a.agId !== userId && a.cmId !== userId)
     );
@@ -2618,6 +2624,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastMasterSheetSyncedAt,
         isSyncingMasterSheet,
         isSheetReady,
+        isAuthReady,
         pushAllMasterTabsToGoogleSheet,
         pullRateAndPromotionsFromGoogleSheet,
         importRateTableRowsFromSheetTsv,

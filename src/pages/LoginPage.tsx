@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { users, login } = useApp();
+  const { login } = useApp();
   const navigate = useNavigate();
 
   const [loginId, setLoginId] = useState('');
@@ -21,18 +21,16 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const performLogin = (targetId: string, targetPw: string) => {
+  const performLogin = async (targetId: string, targetPw: string) => {
     setErrorMessage(null);
     setIsSubmitting(true);
-    setTimeout(() => {
-      const res = login(targetId, targetPw);
-      setIsSubmitting(false);
-      if (!res.ok) {
-        setErrorMessage(res.message);
-        return;
-      }
-      navigate('/dashboard');
-    }, 280);
+    const res = await login(targetId, targetPw);
+    setIsSubmitting(false);
+    if (!res.ok) {
+      setErrorMessage(res.message);
+      return;
+    }
+    navigate('/dashboard');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -43,8 +41,6 @@ export const LoginPage: React.FC = () => {
     }
     performLogin(loginId, password);
   };
-
-  const activeAccounts = users.filter((u) => u.isActive);
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row">
@@ -179,49 +175,6 @@ export const LoginPage: React.FC = () => {
             </form>
           </div>
 
-          {/* Quick-Login Account Cards */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900">등록된 계정 바로 접속</h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              클릭 시 해당 계정의 권한으로 즉시 로그인됩니다.
-            </p>
-
-            <div className="mt-4 grid grid-cols-1 gap-2.5">
-              {activeAccounts.map((acc) => (
-                <button
-                  key={acc.id}
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    setLoginId(acc.loginId);
-                    setPassword(acc.password);
-                    performLogin(acc.loginId, acc.password);
-                  }}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-slate-400 hover:bg-slate-100 transition-all"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold ${
-                        acc.role === 'ADMIN'
-                          ? 'bg-slate-900 text-white'
-                          : acc.role === 'AG'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-emerald-600 text-white'
-                      }`}>
-                        {acc.role}
-                      </span>
-                      <span className="text-sm font-bold text-slate-900">{acc.name}</span>
-                      <span className="text-xs text-slate-500">· ID: {acc.loginId}</span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-slate-500">{acc.affiliation || '소속 없음'}</p>
-                  </div>
-                  <span className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 group-hover:bg-slate-900 group-hover:text-white transition-colors">
-                    접속 →
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

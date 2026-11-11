@@ -24,6 +24,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     logout,
     draftsV2,
     lastMasterSheetSyncedAt,
+    pushToast,
   } = useApp();
   const navigate = useNavigate();
 
@@ -47,16 +48,18 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
   const agUsers = users.filter((u) => u.role === 'AG' && u.isActive);
   const isAdmin = currentUser?.role === 'ADMIN';
 
-  const handleDirectLogin = (e: React.FormEvent) => {
+  const handleDirectLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginIdInput.trim()) return;
-    const res = login(loginIdInput.trim(), passwordInput);
-    if (res.ok) {
-      setLoginModalOpen(false);
-      setAccountMenuOpen(false);
-      setLoginIdInput('');
-      setPasswordInput('');
+    const res = await login(loginIdInput.trim(), passwordInput);
+    if (!res.ok) {
+      pushToast({ type: 'error', title: '로그인 실패', description: res.message });
+      return;
     }
+    setLoginModalOpen(false);
+    setAccountMenuOpen(false);
+    setLoginIdInput('');
+    setPasswordInput('');
   };
 
   const navItems = [

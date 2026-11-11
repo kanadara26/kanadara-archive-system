@@ -13,10 +13,10 @@ export default defineConfig(({ mode }) => {
         name: 'kanadara-api-dev',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
-            const match = req.url?.match(/^\/api\/gsheets\/(pull|push)(?:\?|$)/);
+            const match = req.url?.match(/^\/api\/(gsheets\/(?:pull|push)|auth\/(?:login|logout))(?:\?|$)/);
             if (!match) return next();
             try {
-              const mod = await server.ssrLoadModule(`/api/gsheets/${match[1]}.ts`);
+              const mod = await server.ssrLoadModule(`/api/${match[1]}.ts`);
               await mod.default(req, res);
             } catch (err) {
               next(err);

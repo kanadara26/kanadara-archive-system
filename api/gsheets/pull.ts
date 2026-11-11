@@ -1,21 +1,29 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { getWebhookConfig, MISSING_CONFIG_ERROR, send } from './_webhook';
+import {
+  HttpError,
+  USERS_TAB,
+  getSession,
+  handleError,
+  readSheet,
+  requireActiveAccount,
+  send,
+  userColumns,
+} from '../_lib.js';
 
-// 구글 시트(Apps Script doGet)에서 05~09 탭을 실시간으로 읽어 그대로 전달
-export default async function handler(_req: IncomingMessage, res: ServerResponse) {
-  const config = getWebhookConfig();
-  if (!config) return send(res, 503, { ok: false, error: MISSING_CONFIG_ERROR });
+// 로그인한 ADMIN/AG에게만 05~09 탭 전달. 비밀번호 열은 항상 비워서 내려보냄.
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
-    const resp = await fetch(`${config.url}?token=${encodeURIComponent(config.token)}`);
-    const json = (await resp.json()) as { ok?: boolean; data?: unknown; error?: string };
-    if (!resp.ok || !json.ok || !json.data) {
-      throw new Error(json.error || `웹훅 응답 오류 (HTTP ${resp.status})`);
-    }
-    return send(res, 200, { ok: true, data: json.data });
+    const session = getSession(req);
+    if (!session) throw new HttpError(401, '로그인이 필요합니다.');
+    const tabs = await readSheet();
+    const me = requireActiveAccount(session, tabs);
+
+    const users = tabs[USERS_TAB] || [];
+    const pwCol = userColumns(users[0]).password;
+    tabs[USERS_TAB] = users.map((r, i) => (i === 0 ? r : r.map((c, j) => (j === pwCol ? '' : c))));
+
+    return send(res, 200, { ok: true, data: tabs, me: { id: me.id, role: me.role } });
   } catch (err) {
-    return send(res, 502, {
-      ok: false,
-      error: err instanceof Error ? err.message : '구글 시트 읽기 실패',
-    });
+    return handleError(res, err);
   }
 }
