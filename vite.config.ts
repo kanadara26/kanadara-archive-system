@@ -13,7 +13,9 @@ export default defineConfig(({ mode }) => {
         name: 'kanadara-api-dev',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
-            const match = req.url?.match(/^\/api\/(gsheets\/(?:pull|push)|auth\/(?:login|logout))(?:\?|$)/);
+            const match = req.url?.match(
+              /^\/api\/(gsheets\/(?:pull|push)|auth\/(?:login|logout)|images\/(?:upload|delete|file))(?:\?|$)/
+            );
             if (!match) return next();
             try {
               const mod = await server.ssrLoadModule(`/api/${match[1]}.ts`);

@@ -9,12 +9,13 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'kanadara-api-'));
-const entries = ['api/_lib.ts', 'api/auth/login.ts', 'api/auth/logout.ts', 'api/gsheets/pull.ts', 'api/gsheets/push.ts'];
+const entries = ['api/_lib.ts', 'api/auth/login.ts', 'api/auth/logout.ts', 'api/gsheets/pull.ts', 'api/gsheets/push.ts',
+  'api/images/upload.ts', 'api/images/delete.ts', 'api/images/file.ts'];
 await build({ entryPoints: entries, outdir: out, outbase: 'api', format: 'esm', platform: 'node', bundle: false, logLevel: 'error' });
 fs.writeFileSync(path.join(out, 'package.json'), '{"type":"module"}');
 const load = async (p) => (await import(pathToFileURL(path.join(out, p)).href)).default;
-const [login, logout, pull, push] = await Promise.all(
-  ['auth/login.js', 'auth/logout.js', 'gsheets/pull.js', 'gsheets/push.js'].map(load)
+const [login, logout, pull, push, upload, removeImage, imageFile] = await Promise.all(
+  ['auth/login.js', 'auth/logout.js', 'gsheets/pull.js', 'gsheets/push.js', 'images/upload.js', 'images/delete.js', 'images/file.js'].map(load)
 );
 
 // ── 가짜 Apps Script (토큰 검증 + 메모리 시트) ──
@@ -25,16 +26,31 @@ const sheet = {
   '05_요율표_마스터': [['요율행ID']], '06_카드사별_프로모션_마스터': [['프로모션ID']],
   '07_거래내역_통합마스터': [['거래ID']], '08_분할결제_상세행_DB': [['분할행ID']],
   '09_사용자_CM_마스터': [H, row('adm', 'ADMIN', 'admin', 'Admin#Pass1'), row('ag1', 'AG', 'ag', 'AgPass#123'),
-    row('cm1', 'CM', 'cm', 'CmPass#123'), row('ag2', 'AG', 'old', 'OldPass#123', 'N')],
+    row('cm1', 'CM', 'cm', 'CmPass#123'), row('ag2', 'AG', 'old', 'OldPass#123', 'N'),
+    [...row('ag3', 'AG', 'num', 12345678), ].map((c, i) => (i === 10 ? true : c))], // 숫자 비밀번호·불리언 활성값
 };
+const images = new Map(); // 가짜 Drive: 이미지ID → { mimeType, base64 }
 const fakeFetch = async (url, opts = {}) => {
   const reply = (o) => new Response(JSON.stringify(o));
   if (!opts.method || opts.method === 'GET') {
-    if (new URL(url).searchParams.get('token') !== TOKEN) return reply({ ok: false, error: 'unauthorized' });
+    const q = new URL(url).searchParams;
+    if (q.get('token') !== TOKEN) return reply({ ok: false, error: 'unauthorized' });
+    if (q.get('action') === 'image') {
+      const img = images.get(q.get('id'));
+      return reply(img ? { ok: true, ...img } : { ok: false, error: '이미지를 찾을 수 없습니다.' });
+    }
     return reply({ ok: true, data: structuredClone(sheet) });
   }
   const body = JSON.parse(opts.body);
   if (body.token !== TOKEN) return reply({ ok: false, error: 'unauthorized' });
+  if (body.action === 'uploadImage') {
+    if (body.base64) images.set(body.meta.id, { mimeType: body.mimeType, base64: body.base64 });
+    return reply({ ok: true });
+  }
+  if (body.action === 'deleteImage') {
+    images.delete(body.id);
+    return reply({ ok: true });
+  }
   for (const op of body.batchOps) sheet[op.range.replace(/'/g, '').split('!')[0]] = op.data;
   return reply({ ok: true, syncedAt: 'now' });
 };
@@ -42,14 +58,16 @@ globalThis.fetch = fakeFetch;
 process.env.GSHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/TEST/exec';
 process.env.GSHEETS_WEBHOOK_TOKEN = TOKEN;
 
-const call = async (handler, { method = 'GET', body, cookie } = {}) => {
+const call = async (handler, { method = 'GET', body, cookie, url = '/' } = {}) => {
   const req = Readable.from(body ? [JSON.stringify(body)] : []);
-  Object.assign(req, { method, url: '/', headers: cookie ? { cookie } : {} });
+  Object.assign(req, { method, url, headers: cookie ? { cookie } : {} });
   const r = { status: 0, headers: {}, body: null };
   await handler(req, {
     set statusCode(v) { r.status = v; },
     setHeader(k, v) { r.headers[k.toLowerCase()] = v; },
-    end(b) { r.body = JSON.parse(b); },
+    end(b) {
+      try { r.body = JSON.parse(b); } catch { r.body = b; } // 이미지는 바이너리
+    },
   });
   r.cookie = String(r.headers['set-cookie'] || '').split(';')[0];
   return r;
@@ -146,7 +164,39 @@ assert.deepEqual(sheet['08_분할결제_상세행_DB'].slice(1).map((r) => r[1])
 assert.ok(sheet['07_거래내역_통합마스터'].every((r) => r.length === 2), '행 너비 통일');
 assert.equal((await call(push, { method: 'POST', cookie: adm.cookie, body: { batchOps: [tw([], [], []).batchOps[0]] } })).status, 400, '07만 단독 저장 불가');
 
-// 8) 로그아웃 쿠키 삭제, 설정 누락 시 거부, 웹훅 토큰 불일치는 실패로 전달
+// 8) 시트 원래 값: 숫자로 저장된 비밀번호·불리언 활성값도 로그인 가능
+assert.equal((await call(login, { method: 'POST', body: { loginId: 'num', password: '12345678' } })).status, 200);
+
+// 9) 요율표 이미지: ADMIN만 등록·삭제, SVG 거부, 로그인한 사용자만 열람
+const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64');
+const agNow = await call(login, { method: 'POST', body: { loginId: 'num', password: '12345678' } });
+assert.equal((await call(upload, { method: 'POST', cookie: agNow.cookie, body: { title: 't', mimeType: 'image/png', base64: png } })).status, 403, 'AG 업로드 불가');
+assert.equal((await call(upload, { method: 'POST', cookie: adm.cookie, body: { title: 't', mimeType: 'image/svg+xml', base64: png } })).status, 400, 'SVG 거부');
+assert.equal((await call(upload, { method: 'POST', cookie: adm.cookie, body: { title: '', mimeType: 'image/png', base64: png } })).status, 400, '제목 필수');
+assert.equal((await call(upload, { method: 'POST', cookie: adm.cookie, body: { title: 't', externalUrl: 'http://x' } })).status, 400, 'https만');
+const up = await call(upload, { method: 'POST', cookie: adm.cookie, body: { title: '11월 요율표', mimeType: 'image/png', base64: png } });
+assert.equal(up.status, 200);
+assert.match(up.body.image.uploadedBy, /admin|adm/);
+const url = up.body.image.imageUrl;
+assert.ok(url.startsWith('/api/images/file?id='));
+assert.equal((await call(imageFile, { url })).status, 401, '로그인 없이 열람 불가');
+const f = await call(imageFile, { url, cookie: agNow.cookie });
+assert.equal(f.status, 200, 'AG도 열람 가능');
+assert.equal(f.headers['content-type'], 'image/png');
+assert.equal(f.headers['x-content-type-options'], 'nosniff');
+assert.deepEqual(Buffer.from(f.body), Buffer.from(png, 'base64'));
+assert.equal((await call(removeImage, { method: 'POST', cookie: agNow.cookie, body: { id: up.body.image.id } })).status, 403, 'AG 삭제 불가');
+assert.equal((await call(removeImage, { method: 'POST', cookie: adm.cookie, body: { id: up.body.image.id } })).status, 200);
+assert.equal((await call(imageFile, { url, cookie: adm.cookie })).status, 502, '삭제 후 열람 불가');
+
+// 9-1) 같은 아이디로 5번 틀리면 맞는 비밀번호도 15분간 잠김 (다른 아이디는 영향 없음)
+for (let i = 0; i < 5; i++) {
+  assert.equal((await call(login, { method: 'POST', body: { loginId: 'num', password: 'bad' } })).status, 401);
+}
+assert.equal((await call(login, { method: 'POST', body: { loginId: 'NUM', password: '12345678' } })).status, 429, '잠금');
+assert.equal((await call(login, { method: 'POST', body: { loginId: 'admin', password: 'Admin#Pass1' } })).status, 200, '다른 아이디는 정상');
+
+// 10) 로그아웃 쿠키 삭제, 설정 누락 시 거부, 웹훅 토큰 불일치는 실패로 전달
 assert.match(String((await call(logout, { method: 'POST' })).headers['set-cookie']), /Max-Age=0/);
 process.env.GSHEETS_WEBHOOK_TOKEN = 'wrong-token';
 assert.equal((await call(login, { method: 'POST', body: { loginId: 'admin', password: 'Admin#Pass1' } })).status, 502);

@@ -33,6 +33,21 @@ try {
   // 4) 빈 시트 → 0건, 오류 없음
   assert.equal(cfg.parseTransactionsFrom2D([]).transactions.length, 0);
 
+  // 5) 셀 안 줄바꿈: 시트 1행은 웹앱에서도 1건 (예전엔 줄마다 가짜 프로모션이 생겼음)
+  const promoRow = ['promo-1', '신한', '#0046ff', '11월 프로모션', '2026-11-01', '계속 진행', '통합', '30000000', '', '3,000만원 이상',
+    '0', '0', '0.15', '0.1', '0', '0', '• 대상:\n• 기준:\n• 유의사항:', 'FALSE', '2026-11-11 10:00'];
+  const promos = cfg.parsePromotionsFrom2D([cfg.PROMOTION_SHEET_HEADERS, promoRow]).promotions;
+  assert.equal(promos.length, 1);
+  assert.equal(promos[0].promotionConditionText, '• 대상:\n• 기준:\n• 유의사항:');
+  assert.equal(promos[0].isActive, false, '줄바꿈 뒤 열(사용여부)도 제자리');
+  assert.equal(promos[0].updatedAt, '2026-11-11 10:00');
+  // 웹앱이 쓴 06 탭을 다시 읽어도 그대로
+  const again = cfg.parsePromotionsFrom2D(cfg.serializePromotionsTo2D(promos).map((r) => r.map(String))).promotions;
+  assert.deepEqual(again, promos);
+  const rateRows = cfg.parseRateTableFrom2D([cfg.RATE_TABLE_SHEET_HEADERS,
+    ['rt-1', '신한', '#0046ff', '일시불', '일반', '2,000만원 이상', '1달', '1.9', '0', '0.85', '0.5', '2026-11-01', '비고 1줄\n비고 2줄']]).rows;
+  assert.equal(rateRows.length, 1);
+
   console.log('OK: sheet round-trip checks passed');
 } finally {
   await server.close();

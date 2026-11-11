@@ -15,9 +15,11 @@ import {
 } from '../../types';
 import { calcSplitTotals, formatKRW } from '../../utils/format';
 import {
+  AlertTriangle,
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Download,
   Edit3,
   RotateCcw,
   Search,
@@ -50,7 +52,7 @@ function getTxPaymentDetailSummary(tx: Transaction): string {
   if (!first) return methodType;
 
   const firstCat =
-    first.rateCategory && first.rateCategory !== '기본'
+    first.rateCategory && first.rateCategory !== '일반'
       ? ` [${first.rateCategory}]`
       : '';
 
@@ -59,7 +61,7 @@ function getTxPaymentDetailSummary(tx: Transaction): string {
       .map(
         (s) =>
           `${s.paymentMethod === '다이렉트할부' ? '다이렉트' : s.paymentMethod}${
-            s.rateCategory && s.rateCategory !== '기본' ? `[${s.rateCategory}]` : ''
+            s.rateCategory && s.rateCategory !== '일반' ? `[${s.rateCategory}]` : ''
           } ${Math.round(s.amount / 10000).toLocaleString()}만`
       )
       .join(' + ')})`;
@@ -68,6 +70,24 @@ function getTxPaymentDetailSummary(tx: Transaction): string {
     return `일시불${firstCat} · 캐시백 ${first.cashbackRate}%`;
   }
   return `${methodType}${firstCat} ${first.installmentMonths}개월 · 금리 ${first.interestRate}%`;
+}
+
+// 엑셀에서 =, +, -, @로 시작하는 글자를 수식으로 실행하지 않도록 앞에 ' 를 붙임
+function csvCell(v: string | number): string {
+  if (typeof v === 'number') return String(v);
+  const text = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// ponytail: 엑셀 전용 라이브러리 없이 CSV(UTF-8 BOM) — 엑셀에서 한글 그대로 열림. 서식·여러 시트가 필요해지면 xlsx 도입
+function downloadCsv(fileName: string, rows: (string | number)[][]) {
+  const body = '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000); // 일부 브라우저는 클릭 직후 해제하면 다운로드 실패
 }
 
 export const MonthlySettlementPageV2: React.FC = () => {
@@ -124,6 +144,20 @@ export const MonthlySettlementPageV2: React.FC = () => {
     () => users.filter((u) => u.role === 'CM'),
     [users]
   );
+
+  // 정산(원천징수)에 필요한 CM 주민번호·사업자번호: 현재 계정 정보 우선, 없으면 거래 당시 저장값
+  const getCmIds = (tx: Transaction) => {
+    const cm = users.find((u) => u.id === tx.cmId);
+    return {
+      rrn: cm?.rrn || tx.cmProfile.rrn || '',
+      businessNumber: cm?.businessNumber || tx.cmProfile.businessNumber || '',
+      phone: cm?.phone || tx.cmProfile.phone || '',
+    };
+  };
+  const isCmInfoMissing = (tx: Transaction) => {
+    const ids = getCmIds(tx);
+    return !ids.rrn && !ids.businessNumber;
+  };
 
   // 월별 거래 건수 요약 (빠른 월 이동용)
   const availableMonths = useMemo(() => {
@@ -260,6 +294,35 @@ export const MonthlySettlementPageV2: React.FC = () => {
       totalAgCommission,
     };
   }, [filteredTransactions]);
+
+  const missingCmTxCount = filteredTransactions.filter(isCmInfoMissing).length;
+
+  const handleDownloadCsv = () => {
+    const header = [
+      '거래번호', '승인일', '작성일', '고객명', '진행상황', '정산상태', '담당CM', 'CM소속',
+      'CM주민번호', 'CM사업자번호', 'CM연락처', '카드사', '결제정보', '거래금액',
+      'CM수수료', 'CM요율(%)', 'AG수수료', 'AG요율(%)', '비고',
+    ];
+    const rows = filteredTransactions.map((tx) => {
+      const calc = calcSplitTotals(tx.paymentSplits, tx.appliedPromotions);
+      const ids = getCmIds(tx);
+      const card = tx.paymentSplits[0]?.cardCompany || '제휴카드사(삼성)';
+      return [
+        tx.id, tx.approvalDate || '', tx.requestDate, tx.customerName,
+        APPROVAL_STATUS_META[normalizeV2ProgressStatus(tx.status)]?.label || tx.status,
+        tx.settlementStatus || '정산 대기', tx.cmProfile.name, tx.cmProfile.affiliation,
+        ids.rrn, ids.businessNumber, ids.phone, V2_CARD_DISPLAY_NAMES[card],
+        getTxPaymentDetailSummary(tx), calc.totalAmount, calc.totalCmCommission,
+        calc.effectiveCmRate, calc.totalAgCommission, calc.effectiveAgRate, tx.requestMemo || '',
+      ];
+    });
+    rows.push([
+      '합계', '', '', `${summary.txCount}건`, '', '', `거래선 ${summary.partnerCount}곳`, '', '', '', '', '', '',
+      summary.totalAmount, summary.totalCmCommission, '', summary.totalAgCommission, '', '',
+    ]);
+    const label = isCustomRange ? `${startDate}~${endDate}` : `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    downloadCsv(`카나다라_정산_${label}.csv`, [header, ...rows]);
+  };
 
   const handleResetFilters = () => {
     setCardFilter('ALL');
@@ -525,6 +588,25 @@ export const MonthlySettlementPageV2: React.FC = () => {
 
       {/* 4. 거래 내역 표 (PC 테이블 & 모바일 카드형 반응형) */}
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+          {missingCmTxCount > 0 ? (
+            <p className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              CM 주민번호·사업자번호가 없는 거래 {missingCmTxCount}건 — 설정에서 CM 정보를 입력해 주세요.
+            </p>
+          ) : (
+            <span className="text-xs font-semibold text-slate-500">조회된 거래 {summary.txCount}건</span>
+          )}
+          <button
+            type="button"
+            onClick={handleDownloadCsv}
+            disabled={filteredTransactions.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-40"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            엑셀 다운로드
+          </button>
+        </div>
         {filteredTransactions.length === 0 ? (
           <div className="py-16 text-center space-y-2">
             <p className="text-sm font-bold text-slate-600">
@@ -588,6 +670,7 @@ export const MonthlySettlementPageV2: React.FC = () => {
                         <td className="py-3.5 px-4">
                           <span className="font-bold text-slate-800 block">
                             {tx.cmProfile.name}
+                            {isCmInfoMissing(tx) && <CmMissingBadge />}
                           </span>
                           <span className="text-[11px] text-slate-400">
                             {tx.cmProfile.affiliation}
@@ -703,6 +786,7 @@ export const MonthlySettlementPageV2: React.FC = () => {
                         <span className="text-xs font-semibold text-slate-500">
                           (CM: {tx.cmProfile.name})
                         </span>
+                        {isCmInfoMissing(tx) && <CmMissingBadge />}
                         <span
                           className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ${settlementMeta.badgeClass}`}
                         >
@@ -867,7 +951,7 @@ export const MonthlySettlementPageV2: React.FC = () => {
                               ({isLump ? '1개월' : `${split.installmentMonths}개월`})
                             </span>
                             <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
-                              {split.rateCategory || '기본'}
+                              {split.rateCategory || '일반'}
                             </span>
                           </div>
                           <span className="tabular-nums text-sm">
@@ -1005,3 +1089,12 @@ export const MonthlySettlementPageV2: React.FC = () => {
     </div>
   );
 };
+
+const CmMissingBadge: React.FC = () => (
+  <span
+    title="주민번호·사업자번호가 없어 정산(원천징수) 처리가 어렵습니다. 설정 > CM 관리에서 입력해 주세요."
+    className="ml-1.5 inline-flex items-center rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-200"
+  >
+    정보 누락
+  </span>
+);

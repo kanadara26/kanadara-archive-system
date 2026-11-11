@@ -35,3 +35,7 @@ lerna-debug.log*
 
 # 시트 데이터(개인정보 포함) 스냅샷은 절대 공개 폴더/저장소에 두지 않음
 public/gsheets_live_mirror.json
+
+# 로컬 가짜 시트 데이터
+scripts/*.local.json
+scripts/*.local.mjs

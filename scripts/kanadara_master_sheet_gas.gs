@@ -83,7 +83,7 @@ function registerRateRow() {
   var rawId = String(vals[0] || '').trim();
   var cardCompany = String(vals[1] || '').trim() || '제휴카드사(삼성)';
   var paymentMethod = String(vals[3] || '').trim() || '일시불';
-  var category = String(vals[4] || '').trim() || '기본';
+  var category = String(vals[4] || '').trim() || '일반';
   var amountTier = String(vals[5] || '').trim() || '2,000만원 이상';
   var rawMonths = String(vals[6] || '').trim() || '24 / 36 / 48개월';
   var rawCashback = parseFloat(vals[7]) || 0;
@@ -191,7 +191,7 @@ function loadLatestRateToForm() {
   consoleSheet.getRange('C6').setValue('');
   consoleSheet.getRange('C7').setValue(data[1]);
   consoleSheet.getRange('C9').setValue(data[3]);
-  consoleSheet.getRange('C10').setValue(data[4] || '기본');
+  consoleSheet.getRange('C10').setValue(data[4] || '일반');
   consoleSheet.getRange('C11').setValue(data[5]);
   consoleSheet.getRange('C12').setValue(data[6]);
   consoleSheet.getRange('C13').setValue(data[7]);
@@ -211,7 +211,7 @@ function clearRateForm() {
   consoleSheet.getRange('C6').setValue('');
   consoleSheet.getRange('C7').setValue('제휴카드사(삼성)');
   consoleSheet.getRange('C9').setValue('일시불');
-  consoleSheet.getRange('C10').setValue('기본');
+  consoleSheet.getRange('C10').setValue('일반');
   consoleSheet.getRange('C11').setValue('2,000만원 이상');
   consoleSheet.getRange('C12').setValue('1달');
   consoleSheet.getRange('C13').setValue(1.9);
@@ -246,7 +246,7 @@ function registerPromotionRow() {
   var cardCompany = String(vals[1] || '').trim() || '제휴카드사(삼성)';
   var title = String(vals[3] || '').trim();
   if (!title) {
-    SpreadsheetApp.getUi().alert('프로모션명(C23 셀)을 입력해 주세요.');
+    SpreadsheetApp.getUi().alert('프로모션명(C24 셀)을 입력해 주세요.');
     return;
   }
 
@@ -440,7 +440,7 @@ function registerDealConditionRow() {
   var rawRowId = String(vals[0] || '').trim();
   var groupCode = String(vals[1] || '').trim();
   if (!groupCode) {
-    SpreadsheetApp.getUi().alert('조건그룹코드(C41 셀, 예: SH-ONE-2000)를 입력해 주세요.');
+    SpreadsheetApp.getUi().alert('조건그룹코드(C42 셀, 예: SH-ONE-2000)를 입력해 주세요.');
     return;
   }
 
@@ -456,7 +456,7 @@ function registerDealConditionRow() {
   var installmentTerms = String(vals[11] || '').trim() || '일시불';
   var title = String(vals[12] || '').trim();
   if (!title) {
-    SpreadsheetApp.getUi().alert('표준조건명(C52 셀)을 입력해 주세요.');
+    SpreadsheetApp.getUi().alert('표준조건명(C53 셀)을 입력해 주세요.');
     return;
   }
   var customerCashbackRate = Number((parseFloat(vals[13]) || 0).toFixed(2));

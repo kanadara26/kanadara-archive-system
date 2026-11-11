@@ -135,7 +135,7 @@ export const SPLIT_PAYMENT_METHODS: SplitPaymentMethod[] = [
 
 // 요율표/조건 구분(유형 옵션) 기본 추천 목록 (시트에서 자유롭게 커스텀 구분명 입력 가능)
 export const DEFAULT_RATE_CATEGORIES: string[] = [
-  '기본',
+  '일반',
   '저금리',
   '고금리(고수수료)',
   '선입금(가상계좌)',
@@ -149,7 +149,7 @@ export interface PaymentSplitItem {
   id: string;
   cardCompany: SplitCardCompany;
   paymentMethod: SplitPaymentMethod;
-  rateCategory?: string; // 구분 (예: '기본', '저금리', '선입금(가상계좌)', '신용한도', '특판' 등)
+  rateCategory?: string; // 구분 (예: '일반', '저금리', '선입금(가상계좌)', '신용한도', '특판' 등)
   amount: number; // 결제 금액 (원)
   installmentMonths: number; // 할부개월 (일시불 시 1달 고정)
   cashbackRate: number; // 고객 캐시백율 (%, 일시불일 시에만 지급, 할부 시 0)
@@ -176,7 +176,7 @@ export interface RateTableRowItem {
   id: string;
   cardCompany: SplitCardCompany;
   paymentMethod: SplitPaymentMethod;
-  category?: string; // 구분 (예: '기본', '저금리', '선입금(가상계좌)', '신용한도', '중도상환면제' 등)
+  category?: string; // 구분 (예: '일반', '저금리', '선입금(가상계좌)', '신용한도', '중도상환면제' 등)
   amountTier: string;
   installmentMonths: string;
   cashbackRate: number; // 일시불 캐시백 (%)

@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
+// 요율표 패널은 열 때만 불러옴 (첫 화면 로딩 가볍게)
+const RateTablePanel = lazy(() => import('../RateTablePanel').then((m) => ({ default: m.RateTablePanel })));
 import {
   LayoutDashboard,
   FilePlus2,
@@ -13,6 +15,9 @@ import {
   KeyRound,
   LogOut,
   UserPlus,
+  FileSpreadsheet,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 
 export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -24,11 +29,16 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     logout,
     draftsV2,
     lastMasterSheetSyncedAt,
+    isSheetReady,
+    refreshFromSheet,
+    isRateTableSplitOpen,
+    setRateTableSplitOpen,
     pushToast,
   } = useApp();
   const navigate = useNavigate();
 
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [loginIdInput, setLoginIdInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -150,15 +160,47 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
             </nav>
           </div>
 
-          {/* 우측: 계정 전환 드롭다운 & 시트 연동 상태 & Ver 1 전환 버튼 */}
+          {/* 우측: 요율표 · 시트 새로고침 · 계정 메뉴 */}
           <div className="flex items-center gap-2.5">
-            <span
-              title={`최근 시트 동기화: ${lastMasterSheetSyncedAt}`}
-              className="hidden lg:inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600"
+            <button
+              type="button"
+              onClick={() => setRateTableSplitOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
             >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-              <span>시트 연동됨</span>
-            </span>
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              <span>요율표</span>
+            </button>
+
+            {/* 실제 연결 상태 표시: 시트를 못 불러왔으면 저장이 중지된 상태 */}
+            {isSheetReady ? (
+              <button
+                type="button"
+                disabled={isRefreshing}
+                onClick={async () => {
+                  setIsRefreshing(true);
+                  await refreshFromSheet();
+                  setIsRefreshing(false);
+                }}
+                title={`다른 사람이 등록한 거래까지 최신으로 불러옵니다 (3분마다 자동). 최근 동기화: ${lastMasterSheetSyncedAt}`}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-60"
+              >
+                {isRefreshing ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-500" aria-hidden="true" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                )}
+                <span className="hidden lg:inline">시트 연동됨 · </span>
+                <span>새로고침</span>
+              </button>
+            ) : (
+              <span
+                title="구글 시트를 불러오지 못해 저장이 중지된 상태입니다. 설정 > 시트 연결 테스트로 확인하세요."
+                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>시트 미연결</span>
+              </span>
+            )}
 
             {/* 현재 접속 계정 및 전환 메뉴 */}
             <div className="relative" ref={menuRef}>
@@ -354,6 +396,27 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
       {/* 메인 콘텐츠 영역 */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12">
         {children}
+
+        {/* 요율표·프로모션·요율표 이미지 조회 (ADMIN은 등록·수정) */}
+        {isRateTableSplitOpen && (
+          <div
+            className="fixed inset-0 z-50 flex justify-end bg-slate-900/40"
+            onClick={() => setRateTableSplitOpen(false)}
+            onKeyDown={(e) => e.key === 'Escape' && setRateTableSplitOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="요율표 · 프로모션 조견표"
+              className="h-full w-full max-w-4xl overflow-y-auto bg-slate-50 p-3 sm:p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Suspense fallback={<p className="p-6 text-sm text-slate-500">요율표 불러오는 중…</p>}>
+                <RateTablePanel onCloseSplit={() => setRateTableSplitOpen(false)} />
+              </Suspense>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* 모바일 하단 고정 탭 바 (4개 메뉴) */}

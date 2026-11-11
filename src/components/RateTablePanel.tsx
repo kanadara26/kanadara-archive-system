@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  Star,
   Trash2,
   Upload,
   X,
@@ -38,25 +37,10 @@ import {
 } from '../types';
 import { formatSignedKRW, formatSignedRate } from '../utils/format';
 
-interface RateTablePanelProps {
-  isSplitMode?: boolean;
-  onCloseSplit?: () => void;
-  onApplyRowToSplit?: (row: RateTableRowItem) => void;
-  highlightedCardCompany?: SplitCardCompany;
-  highlightedPaymentMethods?: SplitPaymentMethod[];
-  appliedPromotionIds?: string[];
-  onTogglePromotion?: (promo: CardPromotionItem) => void;
-}
+// 오늘 날짜 (YYYY-MM-DD, 브라우저 시간 기준)
+const todayStr = () => new Date().toLocaleDateString('sv-SE');
 
-export const RateTablePanel: React.FC<RateTablePanelProps> = ({
-  isSplitMode = false,
-  onCloseSplit,
-  onApplyRowToSplit,
-  highlightedCardCompany,
-  highlightedPaymentMethods = [],
-  appliedPromotionIds = [],
-  onTogglePromotion,
-}) => {
+export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onCloseSplit }) => {
   const {
     currentUser,
     rateTableImages,
@@ -68,7 +52,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
     deleteRateTableRow,
     saveCardPromotion,
     deleteCardPromotion,
-    systemReferenceDate,
     lastMasterSheetSyncedAt,
     isSyncingMasterSheet,
     pushAllMasterTabsToGoogleSheet,
@@ -86,15 +69,15 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   const [cardFilter, setCardFilter] = useState<'ALL' | SplitCardCompany>('ALL');
   const [methodFilter, setMethodFilter] = useState<'ALL' | SplitPaymentMethod>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [pinHighlightedToTop, setPinHighlightedToTop] = useState<boolean>(true);
-  const [onlyHighlightedCard, setOnlyHighlightedCard] = useState<boolean>(false);
 
   // Admin Image Upload Modal/Form state
   const [showImageForm, setShowImageForm] = useState(false);
   const [imgTitle, setImgTitle] = useState('');
   const [imgCardTag, setImgCardTag] = useState('전 카드사 통합');
-  const [imgEffectiveDate, setImgEffectiveDate] = useState(systemReferenceDate);
+  const [imgEffectiveDate, setImgEffectiveDate] = useState(todayStr);
   const [imgUrl, setImgUrl] = useState('');
+  const [imgFile, setImgFile] = useState<File | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imgNote, setImgNote] = useState('');
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
   const [confirmDeleteRowId, setConfirmDeleteRowId] = useState<string | null>(null);
@@ -118,14 +101,14 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   const [copiedFromRowLabel, setCopiedFromRowLabel] = useState<string | null>(null);
   const [rowCard, setRowCard] = useState<SplitCardCompany>('제휴카드사(삼성)');
   const [rowMethod, setRowMethod] = useState<SplitPaymentMethod>('일시불');
-  const [rowCategory, setRowCategory] = useState('기본');
+  const [rowCategory, setRowCategory] = useState('일반');
   const [rowTier, setRowTier] = useState('2,000만원 이상');
   const [rowMonths, setRowMonths] = useState('1달');
   const [rowCashback, setRowCashback] = useState('1.9');
   const [rowInterest, setRowInterest] = useState('0');
   const [rowAgRate, setRowAgRate] = useState('0.85');
   const [rowCmRate, setRowCmRate] = useState('0.50');
-  const [rowEffectiveDate, setRowEffectiveDate] = useState(systemReferenceDate);
+  const [rowEffectiveDate, setRowEffectiveDate] = useState(todayStr);
   const [rowRemark, setRowRemark] = useState('');
 
   // Admin Card Promotion Form state (supports Create, Edit, Copy-to-Modify, and -% negative adjustments)
@@ -134,7 +117,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   const [copiedFromPromoLabel, setCopiedFromPromoLabel] = useState<string | null>(null);
   const [promoCard, setPromoCard] = useState<SplitCardCompany>('제휴카드사(삼성)');
   const [promoTitle, setPromoTitle] = useState('');
-  const [promoStartDate, setPromoStartDate] = useState(systemReferenceDate);
+  const [promoStartDate, setPromoStartDate] = useState(todayStr);
   const [promoHasEndDate, setPromoHasEndDate] = useState(false);
   const [promoEndDate, setPromoEndDate] = useState('2026-11-30');
   const [promoMethod, setPromoMethod] = useState<PromotionPaymentMethod>('통합');
@@ -151,70 +134,29 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
     '• 프로모션 적용 대상:\n• 인센티브/요율 가감(±%) 기준:\n• 유의사항:'
   );
 
-  const isCm = currentUser?.role === 'CM';
   // [요구사항 1] 요율표 수정 기능은 오직 ADMIN에게만 부여
   const canEdit = currentUser?.role === 'ADMIN';
 
-  // 하이라이트 카드사 매칭 건수 집계
-  const highlightedStats = useMemo(() => {
-    if (!highlightedCardCompany) return { rowCount: 0, promoCount: 0 };
-    return {
-      rowCount: rateTableRows.filter((r) => r.cardCompany === highlightedCardCompany).length,
-      promoCount: cardPromotions.filter(
-        (p) => p.cardCompany === highlightedCardCompany && p.isActive
-      ).length,
-    };
-  }, [highlightedCardCompany, rateTableRows, cardPromotions]);
-
-  // 요율표 데이터 행 필터링 + 선택 카드사 하이라이트 상단 정렬
+  // 요율표 데이터 행 필터링
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const list = rateTableRows.filter((r) => {
-      if (onlyHighlightedCard && highlightedCardCompany) {
-        if (r.cardCompany !== highlightedCardCompany) return false;
-      } else if (cardFilter !== 'ALL' && r.cardCompany !== cardFilter) {
-        return false;
-      }
+    return rateTableRows.filter((r) => {
+      if (cardFilter !== 'ALL' && r.cardCompany !== cardFilter) return false;
       if (methodFilter !== 'ALL' && r.paymentMethod !== methodFilter) return false;
       if (q) {
         const hay =
-          `${r.cardCompany} ${r.paymentMethod} ${r.category || '기본'} ${r.amountTier} ${r.installmentMonths} ${r.remark}`.toLowerCase();
+          `${r.cardCompany} ${r.paymentMethod} ${r.category || '일반'} ${r.amountTier} ${r.installmentMonths} ${r.remark}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
+  }, [rateTableRows, cardFilter, methodFilter, searchQuery]);
 
-    if (pinHighlightedToTop && highlightedCardCompany) {
-      return [...list].sort((a, b) => {
-        const aMatch = a.cardCompany === highlightedCardCompany ? 1 : 0;
-        const bMatch = b.cardCompany === highlightedCardCompany ? 1 : 0;
-        if (aMatch !== bMatch) return bMatch - aMatch;
-        const aMethodMatch = highlightedPaymentMethods.includes(a.paymentMethod) ? 1 : 0;
-        const bMethodMatch = highlightedPaymentMethods.includes(b.paymentMethod) ? 1 : 0;
-        return bMethodMatch - aMethodMatch;
-      });
-    }
-    return list;
-  }, [
-    rateTableRows,
-    onlyHighlightedCard,
-    highlightedCardCompany,
-    cardFilter,
-    methodFilter,
-    searchQuery,
-    pinHighlightedToTop,
-    highlightedPaymentMethods,
-  ]);
-
-  // 카드사 프로모션 필터링 + 선택 카드사 하이라이트 상단 정렬
+  // 카드사 프로모션 필터링
   const filteredPromotions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const list = cardPromotions.filter((p) => {
-      if (onlyHighlightedCard && highlightedCardCompany) {
-        if (p.cardCompany !== highlightedCardCompany) return false;
-      } else if (cardFilter !== 'ALL' && p.cardCompany !== cardFilter) {
-        return false;
-      }
+    return cardPromotions.filter((p) => {
+      if (cardFilter !== 'ALL' && p.cardCompany !== cardFilter) return false;
       if (methodFilter !== 'ALL' && p.paymentMethod !== '통합' && p.paymentMethod !== methodFilter) {
         return false;
       }
@@ -225,55 +167,36 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
       }
       return true;
     });
-
-    if (pinHighlightedToTop && highlightedCardCompany) {
-      return [...list].sort((a, b) => {
-        const aMatch = a.cardCompany === highlightedCardCompany ? 1 : 0;
-        const bMatch = b.cardCompany === highlightedCardCompany ? 1 : 0;
-        return bMatch - aMatch;
-      });
-    }
-    return list;
-  }, [
-    cardPromotions,
-    onlyHighlightedCard,
-    highlightedCardCompany,
-    cardFilter,
-    methodFilter,
-    searchQuery,
-    pinHighlightedToTop,
-  ]);
+  }, [cardPromotions, cardFilter, methodFilter, searchQuery]);
 
   if (!currentUser) return null;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImgUrl(reader.result);
-        if (!imgTitle) {
-          setImgTitle(file.name.replace(/\.[^/.]+$/, ''));
-        }
-      }
-    };
-    reader.readAsDataURL(file);
+    setImgFile(file);
+    setImgUrl('');
+    if (!imgTitle) setImgTitle(file.name.replace(/\.[^/.]+$/, ''));
   };
 
-  const handleAddImage = (e: React.FormEvent) => {
+  const handleAddImage = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = addRateTableImage({
+    if (isUploadingImage) return;
+    setIsUploadingImage(true);
+    const res = await addRateTableImage({
       title: imgTitle,
       cardCompanyTag: imgCardTag,
       effectiveDate: imgEffectiveDate,
-      imageUrl: imgUrl,
       note: imgNote,
+      file: imgFile,
+      externalUrl: imgUrl,
     });
+    setIsUploadingImage(false);
     if (res.ok) {
       setShowImageForm(false);
       setImgTitle('');
       setImgUrl('');
+      setImgFile(null);
       setImgNote('');
     }
   };
@@ -281,16 +204,16 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   const openNewRowForm = () => {
     setEditingRowId(undefined);
     setCopiedFromRowLabel(null);
-    setRowCard(highlightedCardCompany || '제휴카드사(삼성)');
+    setRowCard('제휴카드사(삼성)');
     setRowMethod('일시불');
-    setRowCategory('기본');
+    setRowCategory('일반');
     setRowTier('2,000만원 이상');
     setRowMonths('1달');
     setRowCashback('1.90');
     setRowInterest('0');
     setRowAgRate('0.85');
     setRowCmRate('0.50');
-    setRowEffectiveDate(systemReferenceDate);
+    setRowEffectiveDate(todayStr());
     setRowRemark('');
     setShowRowForm(true);
   };
@@ -300,7 +223,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
     setCopiedFromRowLabel(null);
     setRowCard(row.cardCompany);
     setRowMethod(row.paymentMethod);
-    setRowCategory(row.category || '기본');
+    setRowCategory(row.category || '일반');
     setRowTier(row.amountTier);
     setRowMonths(row.installmentMonths);
     setRowCashback(String(row.cashbackRate));
@@ -315,10 +238,10 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   // 요율 데이터 복사해서 필요한 부분만 빠르게 수정하여 신규 등록하는 기능 (ADMIN 전용)
   const openCopyRowForm = (row: RateTableRowItem) => {
     setEditingRowId(undefined);
-    setCopiedFromRowLabel(`${row.cardCompany} · ${row.paymentMethod} [${row.category || '기본'}] (${row.amountTier})`);
+    setCopiedFromRowLabel(`${row.cardCompany} · ${row.paymentMethod} [${row.category || '일반'}] (${row.amountTier})`);
     setRowCard(row.cardCompany);
     setRowMethod(row.paymentMethod);
-    setRowCategory(row.category || '기본');
+    setRowCategory(row.category || '일반');
     setRowTier(row.amountTier);
     setRowMonths(row.installmentMonths);
     setRowCashback(String(row.cashbackRate));
@@ -336,7 +259,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
       id: editingRowId,
       cardCompany: rowCard,
       paymentMethod: rowMethod,
-      category: rowCategory.trim() || '기본',
+      category: rowCategory.trim() || '일반',
       amountTier: rowTier,
       installmentMonths: rowMethod === '일시불' ? '1달' : rowMonths,
       cashbackRate: rowMethod === '일시불' ? parseFloat(rowCashback) || 0 : 0,
@@ -356,9 +279,9 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
   const openNewPromoForm = () => {
     setEditingPromoId(undefined);
     setCopiedFromPromoLabel(null);
-    setPromoCard(highlightedCardCompany || '제휴카드사(삼성)');
+    setPromoCard('제휴카드사(삼성)');
     setPromoTitle('');
-    setPromoStartDate(systemReferenceDate);
+    setPromoStartDate(todayStr());
     setPromoHasEndDate(false);
     setPromoEndDate('2026-11-30');
     setPromoMethod('통합');
@@ -454,8 +377,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
     }
   };
 
-  const activeSelectedCardFilter =
-    onlyHighlightedCard && highlightedCardCompany ? highlightedCardCompany : cardFilter;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
@@ -479,11 +400,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
                   <Lock className="w-3 h-3 text-slate-400" />
                   조회 전용
-                </span>
-              )}
-              {isSplitMode && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-200 border border-emerald-400/30">
-                  2분할 비교 모드
                 </span>
               )}
             </div>
@@ -766,11 +682,10 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
           <button
             type="button"
             onClick={() => {
-              setOnlyHighlightedCard(false);
               setCardFilter('ALL');
             }}
             className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
-              activeSelectedCardFilter === 'ALL'
+              cardFilter === 'ALL'
                 ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
                 : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
             }`}
@@ -779,14 +694,12 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
           </button>
           {SPLIT_CARD_COMPANIES.map((card) => {
             const cMeta = CARD_COMPANY_COLORS[card];
-            const isSelected = activeSelectedCardFilter === card;
-            const isHighlightTarget = highlightedCardCompany === card;
+            const isSelected = cardFilter === card;
             return (
               <button
                 key={card}
                 type="button"
                 onClick={() => {
-                  setOnlyHighlightedCard(false);
                   setCardFilter(isSelected ? 'ALL' : card);
                 }}
                 style={
@@ -804,7 +717,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                 }
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
                   isSelected ? 'shadow-sm scale-[1.02]' : 'hover:opacity-90'
-                } ${isHighlightTarget ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
+                }`}
                 title={`${card} 메인 컬러 (${cMeta.mainHex}) 필터`}
               >
                 <span
@@ -812,81 +725,11 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                   style={{ backgroundColor: cMeta.mainHex }}
                 />
                 <span>{card}</span>
-                {isHighlightTarget && (
-                  <Star className="w-3 h-3 fill-current shrink-0" />
-                )}
               </button>
             );
           })}
         </div>
       </div>
-
-      {/* [요구사항 #4] 결제정보에 선택된 카드사 자동 하이라이트 컨트롤 바 */}
-      {highlightedCardCompany && (
-        <div
-          className="border-b px-4 py-2.5 flex flex-wrap items-center justify-between gap-2"
-          style={{
-            backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].softBgHex,
-            borderColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
-          }}
-        >
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-black shadow-2xs"
-              style={{
-                backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
-                color: CARD_COMPANY_COLORS[highlightedCardCompany].badgeTextHex,
-              }}
-            >
-              <Star className="w-3.5 h-3.5 fill-current" />
-              결제정보 선택 카드사 하이라이트: {highlightedCardCompany} (
-              {CARD_COMPANY_COLORS[highlightedCardCompany].mainHex})
-            </span>
-            <span
-              className="text-[11px] font-extrabold"
-              style={{ color: CARD_COMPANY_COLORS[highlightedCardCompany].darkTextHex }}
-            >
-              요율 {highlightedStats.rowCount}건 · 진행 프로모션 {highlightedStats.promoCount}건 매칭됨
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setPinHighlightedToTop((v) => !v)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
-                pinHighlightedToTop
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-600 border-slate-300'
-              }`}
-            >
-              {pinHighlightedToTop ? '★ 선택 카드사 최상단 고정 ON' : '최상단 고정 OFF'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setOnlyHighlightedCard((v) => !v)}
-              style={
-                onlyHighlightedCard
-                  ? {
-                      backgroundColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
-                      color: CARD_COMPANY_COLORS[highlightedCardCompany].badgeTextHex,
-                      borderColor: CARD_COMPANY_COLORS[highlightedCardCompany].mainHex,
-                    }
-                  : undefined
-              }
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
-                onlyHighlightedCard
-                  ? ''
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-              }`}
-            >
-              {onlyHighlightedCard
-                ? `${highlightedCardCompany}만 단독 표시 중`
-                : `${highlightedCardCompany}만 모아보기`}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* =====================================================================
           탭 1: 별도 데이터 표 형식 (카드사별 메인 컬러 적용 + 선택 카드사 하이라이트 + ADMIN 전용 수정)
@@ -1157,19 +1000,15 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                   <th className="py-2.5 px-2.5">적용구간 / 개월</th>
                   <th className="py-2.5 px-2.5 text-right">캐시백(일시불)</th>
                   <th className="py-2.5 px-2.5 text-right">금리(할부)</th>
-                  {!isCm && (
                     <th className="py-2.5 px-2.5 text-right bg-indigo-950 text-indigo-200">
                       AG 수수료율
                     </th>
-                  )}
                   <th className="py-2.5 px-2.5 text-right bg-emerald-950 text-emerald-200">
                     CM 수수료율
                   </th>
                   <th className="py-2.5 px-3">비고 / 실행일</th>
-                  {(onApplyRowToSplit || canEdit) && (
-                    <th className="py-2.5 px-2.5 text-center">
-                      {canEdit ? '동작 (적용·복사·수정·삭제)' : '승인요청 폼 적용'}
-                    </th>
+                  {canEdit && (
+                    <th className="py-2.5 px-2.5 text-center">동작 (복사·수정·삭제)</th>
                   )}
                 </tr>
               </thead>
@@ -1177,29 +1016,12 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                 {filteredRows.map((row) => {
                   const isLump = row.paymentMethod === '일시불';
                   const cardColor = CARD_COMPANY_COLORS[row.cardCompany];
-                  const isHighlightedCard =
-                    Boolean(highlightedCardCompany) &&
-                    row.cardCompany === highlightedCardCompany;
-                  const isHighlightedMethod =
-                    isHighlightedCard &&
-                    highlightedPaymentMethods.includes(row.paymentMethod);
 
                   return (
                     <tr
                       key={row.id}
-                      style={{
-                        borderLeft: `6px solid ${cardColor.mainHex}`,
-                        backgroundColor: isHighlightedCard
-                          ? cardColor.softBgHex
-                          : undefined,
-                      }}
-                      className={`transition-colors ${
-                        isHighlightedCard
-                          ? 'ring-1 ring-inset ring-amber-400 font-semibold'
-                          : highlightedCardCompany
-                          ? 'bg-white opacity-80 hover:opacity-100 hover:bg-slate-50'
-                          : 'hover:bg-slate-50/90'
-                      }`}
+                      style={{ borderLeft: `6px solid ${cardColor.mainHex}` }}
+                      className="transition-colors hover:bg-slate-50/90"
                     >
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
@@ -1210,16 +1032,8 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                             }}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-black shadow-2xs"
                           >
-                            {isHighlightedCard && (
-                              <Star className="w-3 h-3 fill-current shrink-0" />
-                            )}
                             {row.cardCompany}
                           </span>
-                          {isHighlightedCard && (
-                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-slate-950">
-                              선택
-                            </span>
-                          )}
                         </div>
                       </td>
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
@@ -1236,13 +1050,8 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                             {row.paymentMethod}
                           </span>
                           <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                            {row.category || '기본'}
+                            {row.category || '일반'}
                           </span>
-                          {isHighlightedMethod && (
-                            <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
-                              일치
-                            </span>
-                          )}
                         </div>
                       </td>
                       <td className="py-2.5 px-2.5">
@@ -1263,11 +1072,9 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                           <span className="text-slate-300">-</span>
                         )}
                       </td>
-                      {!isCm && (
                         <td className="py-2.5 px-2.5 text-right font-extrabold text-indigo-700 bg-indigo-50/40 whitespace-nowrap">
                           {row.agCommissionRate.toFixed(2)}%
                         </td>
-                      )}
                       <td className="py-2.5 px-2.5 text-right font-extrabold text-emerald-700 bg-emerald-50/40 whitespace-nowrap">
                         {row.cmCommissionRate.toFixed(2)}%
                       </td>
@@ -1275,20 +1082,9 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                         <div>{row.remark}</div>
                         <div className="text-[10px] text-slate-400">실행일: {row.effectiveDate}</div>
                       </td>
-                      {(onApplyRowToSplit || canEdit) && (
+                      {canEdit && (
                         <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                           <div className="inline-flex items-center gap-1.5">
-                            {onApplyRowToSplit && (
-                              <button
-                                type="button"
-                                onClick={() => onApplyRowToSplit(row)}
-                                className="inline-flex items-center gap-1 min-h-7 px-3 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700"
-                                title="좌측 승인요청 폼의 선택된 결제 행에 이 요율을 즉시 채웁니다"
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                                적용
-                              </button>
-                            )}
                             {canEdit && (
                               <button
                                 type="button"
@@ -1676,10 +1472,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
           <div className="space-y-3">
             {filteredPromotions.map((p) => {
               const cardColor = CARD_COMPANY_COLORS[p.cardCompany];
-              const isHighlighted =
-                Boolean(highlightedCardCompany) &&
-                p.cardCompany === highlightedCardCompany;
-              const isApplied = appliedPromotionIds.includes(p.id);
               const cbDelta = Number(p.cashbackRateDelta) || 0;
               const intDelta = Number(p.interestRateDelta) || 0;
               const hasNegativeRate =
@@ -1688,14 +1480,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
               return (
                 <div
                   key={p.id}
-                  style={{
-                    backgroundColor: isHighlighted ? cardColor.softBgHex : undefined,
-                  }}
-                  className={`rounded-xl border p-4 transition-all ${
-                    isHighlighted
-                      ? 'border-amber-400 ring-1 ring-amber-300 shadow-xs'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
+                  className="rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-slate-300"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="space-y-1">
@@ -1707,14 +1492,8 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                           }}
                           className="inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-xs font-black shadow-2xs"
                         >
-                          {isHighlighted && <Star className="w-3 h-3 fill-current" />}
                           {p.cardCompany}
                         </span>
-                        {isHighlighted && (
-                          <span className="inline-flex items-center gap-0.5 rounded bg-amber-500 px-2 py-0.5 text-xs font-black text-slate-950">
-                            선택 카드사
-                          </span>
-                        )}
                         <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-800">
                           결제방법: {p.paymentMethod}
                         </span>
@@ -1740,20 +1519,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      {onTogglePromotion && !isCm && (
-                        <button
-                          type="button"
-                          onClick={() => onTogglePromotion(p)}
-                          className={`inline-flex items-center gap-1 min-h-7 px-3 py-1 rounded-lg text-xs font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 ${
-                            isApplied
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-900 hover:bg-slate-800 text-white'
-                          }`}
-                        >
-                          <Gift className="w-3.5 h-3.5" />
-                          {isApplied ? '현재 거래 적용중' : '+ 거래에 추가'}
-                        </button>
-                      )}
                       {canEdit && (
                         <button
                           type="button"
@@ -1835,7 +1600,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                         할부 금리 반영: <strong>{formatSignedRate(intDelta)}</strong>
                       </div>
                     )}
-                    {!isCm && (
                       <div
                         className={`rounded-lg border px-3 py-1.5 font-bold ${
                           p.agIncentiveRate < 0 || p.agIncentiveAmount < 0
@@ -1858,7 +1622,6 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                           </>
                         )}
                       </div>
-                    )}
                     <div
                       className={`rounded-lg border px-3 py-1.5 font-bold ${
                         p.cmIncentiveRate < 0 || p.cmIncentiveAmount < 0
@@ -1958,7 +1721,7 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-indigo-400 bg-white text-xs font-bold text-indigo-700 cursor-pointer hover:bg-indigo-50">
                   <Upload className="w-4 h-4" />
-                  내 PC에서 요율표 이미지 파일 선택 (PNG/JPG/SVG)
+                  {imgFile ? `선택됨: ${imgFile.name}` : '내 PC에서 요율표 이미지 파일 선택 (PNG/JPG/WebP)'}
                   <input
                     type="file"
                     accept="image/*"
@@ -1969,7 +1732,10 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                 <input
                   type="text"
                   value={imgUrl}
-                  onChange={(e) => setImgUrl(e.target.value)}
+                  onChange={(e) => {
+                    setImgUrl(e.target.value);
+                    setImgFile(null);
+                  }}
                   placeholder="또는 이미지 URL 직접 붙여넣기"
                   className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                 />
@@ -1984,9 +1750,10 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
                 />
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                  disabled={isUploadingImage}
+                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-60"
                 >
-                  이미지 등록
+                  {isUploadingImage ? '업로드 중…' : '이미지 등록'}
                 </button>
               </div>
             </form>
@@ -1994,27 +1761,14 @@ export const RateTablePanel: React.FC<RateTablePanelProps> = ({
 
           <div className="space-y-4">
             {rateTableImages.map((img) => {
-              const matchesHighlight =
-                Boolean(highlightedCardCompany) &&
-                (img.cardCompanyTag.includes('전 카드사') ||
-                  img.cardCompanyTag.includes(highlightedCardCompany!));
               return (
                 <div
                   key={img.id}
-                  className={`border rounded-xl overflow-hidden bg-slate-900/5 ${
-                    matchesHighlight
-                      ? 'border-amber-400 ring-2 ring-amber-300'
-                      : 'border-slate-200'
-                  }`}
+                  className="border border-slate-200 rounded-xl overflow-hidden bg-slate-900/5"
                 >
                   <div className="bg-white px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        {matchesHighlight && (
-                          <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black">
-                            ★ {highlightedCardCompany} 포함
-                          </span>
-                        )}
                         <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[11px] font-bold">
                           {img.cardCompanyTag}
                         </span>

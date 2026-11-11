@@ -19,7 +19,6 @@ export async function readJsonBody(req: IncomingMessage): Promise<Record<string,
 }
 
 // ───────── 구글 시트 웹훅 (URL·토큰은 서버 환경변수에서만) ─────────
-export const SPREADSHEET_ID = '1fGq9OKWroDBovIlkvdrkYmDFZp-HTkeJem5sirv6vvs';
 export const USERS_TAB = '09_사용자_CM_마스터';
 export const WRITABLE_TABS = [
   '05_요율표_마스터',
@@ -48,7 +47,9 @@ export class HttpError extends Error {
 function getWebhookConfig() {
   const url = String(process.env.GSHEETS_WEBHOOK_URL || '').trim();
   const token = String(process.env.GSHEETS_WEBHOOK_TOKEN || '').trim();
-  if (!url.startsWith('https://script.google.com/macros/s/') || !token) {
+  // 로컬 개발(Vercel 밖)에서만 가짜 시트(scripts/fake-sheet.mjs) 주소 허용
+  const isLocalFake = !process.env.VERCEL && url.startsWith('http://127.0.0.1:');
+  if (!(url.startsWith('https://script.google.com/macros/s/') || isLocalFake) || !token) {
     throw new HttpError(
       503,
       '서버에 GSHEETS_WEBHOOK_URL / GSHEETS_WEBHOOK_TOKEN 환경변수가 설정되지 않았습니다.'
@@ -57,28 +58,41 @@ function getWebhookConfig() {
   return { url, token };
 }
 
-export async function readSheet(): Promise<SheetTabs> {
+// Apps Script 웹훅 호출 (GET: 읽기 / POST: 쓰기). ok:false 응답은 502로 전달.
+async function webhookGet<T>(params: Record<string, string> = {}): Promise<T> {
   const { url, token } = getWebhookConfig();
-  const resp = await fetch(`${url}?token=${encodeURIComponent(token)}`);
-  const json = (await resp.json()) as { ok?: boolean; data?: SheetTabs; error?: string };
-  if (!resp.ok || !json.ok || !json.data) {
-    throw new HttpError(502, json.error || `시트 읽기 실패 (HTTP ${resp.status})`);
-  }
-  return json.data;
+  const qs = new URLSearchParams({ token, ...params });
+  const resp = await fetch(`${url}?${qs}`);
+  const json = (await resp.json()) as T & { ok?: boolean; error?: string };
+  if (!resp.ok || !json.ok) throw new HttpError(502, json.error || `시트 읽기 실패 (HTTP ${resp.status})`);
+  return json;
 }
 
-export async function writeSheet(batchOps: unknown[]): Promise<string> {
+export async function webhookPost<T>(payload: Record<string, unknown>): Promise<T> {
   const { url, token } = getWebhookConfig();
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, spreadsheetId: SPREADSHEET_ID, batchOps }),
+    body: JSON.stringify({ token, ...payload }),
   });
-  const json = (await resp.json()) as { ok?: boolean; error?: string; syncedAt?: string };
-  if (!resp.ok || !json.ok) {
-    throw new HttpError(502, json.error || `시트 쓰기 실패 (HTTP ${resp.status})`);
-  }
+  const json = (await resp.json()) as T & { ok?: boolean; error?: string };
+  if (!resp.ok || !json.ok) throw new HttpError(502, json.error || `시트 쓰기 실패 (HTTP ${resp.status})`);
+  return json;
+}
+
+export async function readSheet(): Promise<SheetTabs> {
+  const json = await webhookGet<{ data?: SheetTabs }>();
+  if (!json.data) throw new HttpError(502, '시트 읽기 실패 (데이터 없음)');
+  return json.data;
+}
+
+export async function writeSheet(batchOps: unknown[]): Promise<string> {
+  const json = await webhookPost<{ syncedAt?: string }>({ batchOps });
   return json.syncedAt || new Date().toISOString();
+}
+
+export async function readImageFile(id: string): Promise<{ mimeType: string; base64: string }> {
+  return webhookGet<{ mimeType: string; base64: string }>({ action: 'image', id });
 }
 
 // ───────── 09 탭 계정 ─────────
@@ -188,6 +202,18 @@ export function requireActiveAccount(session: Session | null, tabs: SheetTabs): 
     throw new HttpError(401, '계정이 비활성화되었거나 권한이 변경되었습니다. 다시 로그인해 주세요.');
   }
   return account;
+}
+
+export async function requireLogin(
+  req: IncomingMessage,
+  roles: string[] = ['ADMIN', 'AG']
+): Promise<{ account: SheetAccount; tabs: SheetTabs }> {
+  const session = getSession(req);
+  if (!session) throw new HttpError(401, '로그인이 필요합니다.');
+  const tabs = await readSheet();
+  const account = requireActiveAccount(session, tabs);
+  if (!roles.includes(account.role)) throw new HttpError(403, '권한이 없습니다.');
+  return { account, tabs };
 }
 
 export function handleError(res: ServerResponse, err: unknown) {

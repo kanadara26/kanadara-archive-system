@@ -1010,7 +1010,7 @@ export const DashboardPageV2: React.FC = () => {
                             ({isLump ? '1개월' : `${split.installmentMonths}개월`})
                           </span>
                           <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
-                            {split.rateCategory || '기본'}
+                            {split.rateCategory || '일반'}
                           </span>
                         </div>
                         <span className="text-[11px] text-slate-500 block mt-0.5">

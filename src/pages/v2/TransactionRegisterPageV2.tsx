@@ -228,7 +228,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     users,
     transactions,
     rateTableRows,
-    pullRateAndPromotionsFromGoogleSheet,
+    refreshFromSheet,
     draftsV2,
     saveDraftV2,
     deleteDraftV2,
@@ -242,10 +242,12 @@ export const TransactionRegisterPageV2: React.FC = () => {
   } = useApp();
   const navigate = useNavigate();
 
-  // 거래 승인건 등록 페이지 진입 시 실시간으로 최신 구글 시트 요율 데이터 자동 동기화
+  // 등록 화면에 들어올 때 한 번 최신 요율·프로모션으로 새로고침
+  // (예전에는 의존성에 매번 새로 만들어지는 함수를 넣어 화면이 바뀔 때마다 시트를 다시 읽었음)
   useEffect(() => {
-    pullRateAndPromotionsFromGoogleSheet(true).catch(() => {});
-  }, [pullRateAndPromotionsFromGoogleSheet]);
+    refreshFromSheet(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cmUsers = useMemo(
     () => users.filter((u) => u.role === 'CM' && u.isActive),
@@ -812,8 +814,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
       loginId: `cm.${Date.now()}@autodealer.kr`,
       name: quickCmName.trim(),
       role: 'CM',
-      affiliation: quickCmAffiliation.trim() || '제휴 대리점',
-      phone: quickCmPhone.trim() || '010-0000-0000',
+      affiliation: quickCmAffiliation.trim(),
+      phone: quickCmPhone.trim(),
       isActive: true,
     });
     if (res.ok) {

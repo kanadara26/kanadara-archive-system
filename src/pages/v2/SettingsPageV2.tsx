@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import WEBHOOK_GS from '../../../scripts/Webhook.gs?raw';
 import { useApp } from '../../context/AppContext';
 import { User } from '../../types';
 import { GOOGLE_SHEET_TABS } from '../../constants/googleSheetConfig';
@@ -12,7 +12,6 @@ import {
   FileSpreadsheet,
   Globe,
   KeyRound,
-  Layers,
   Plus,
   RotateCcw,
   ShieldCheck,
@@ -39,76 +38,14 @@ export const SettingsPageV2: React.FC = () => {
     pullRateAndPromotionsFromGoogleSheet,
     pushAllMasterTabsToGoogleSheet,
     importRateTableRowsFromSheetTsv,
-    setAppVersion,
     resetDemoData,
     pushToast,
   } = useApp();
-  const navigate = useNavigate();
 
   const [showWebhookGuide, setShowWebhookGuide] = useState<boolean>(false);
   const [hasCopiedCode, setHasCopiedCode] = useState<boolean>(false);
 
-  const APPS_SCRIPT_SNIPPET = `// 토큰은 [프로젝트 설정 > 스크립트 속성]의 WEBHOOK_TOKEN 값과 일치해야 함 (없으면 모든 요청 거부)
-function checkToken_(token) {
-  var expected = PropertiesService.getScriptProperties().getProperty('WEBHOOK_TOKEN');
-  if (!expected || token !== expected) throw new Error('unauthorized');
-}
-
-function doPost(e) {
-  try {
-    var body = JSON.parse(e.postData.contents);
-    checkToken_(body.token);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ops = body.batchOps || [];
-    for (var i = 0; i < ops.length; i++) {
-      var op = ops[i];
-      if (op.op === 'write' && op.range && op.data) {
-        var clean = op.range.replace(/'/g, '');
-        var parts = clean.split('!');
-        var s = ss.getSheetByName(parts[0]);
-        if (!s) continue;
-        s.clearContents();
-        if (op.data.length > 0 && op.data[0].length > 0) {
-          s.getRange(1, 1, op.data.length, op.data[0].length).setValues(op.data);
-        }
-      } else if (op.op === 'clear' && op.range) {
-        var clean = op.range.replace(/'/g, '');
-        var parts = clean.split('!');
-        var s = ss.getSheetByName(parts[0]);
-        if (s) {
-          if (parts[1]) {
-            s.getRange(parts[1]).clearContent();
-          } else {
-            s.clearContents();
-          }
-        }
-      }
-    }
-    return ContentService.createTextOutput(JSON.stringify({ ok: true, syncedAt: new Date().toISOString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  try {
-    checkToken_(e.parameter.token);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheets = ['05_요율표_마스터', '06_카드사별_프로모션_마스터', '07_거래내역_통합마스터', '08_분할결제_상세행_DB', '09_사용자_CM_마스터'];
-  var result = {};
-  for (var i = 0; i < sheets.length; i++) {
-    var s = ss.getSheetByName(sheets[i]);
-    result[sheets[i]] = s ? s.getDataRange().getDisplayValues() : [];
-  }
-  return ContentService.createTextOutput(JSON.stringify({ ok: true, data: result }))
-    .setMimeType(ContentService.MimeType.JSON);
-}`;
+  const APPS_SCRIPT_SNIPPET = WEBHOOK_GS; // scripts/Webhook.gs 원본을 그대로 표시 (복사본 관리 안 함)
 
   const handleCopySnippet = () => {
     navigator.clipboard.writeText(APPS_SCRIPT_SNIPPET);
@@ -192,7 +129,7 @@ function doGet(e) {
       name: agName.trim(),
       role: 'AG',
       affiliation: agAffiliation.trim() || '카나다라 오토금융팀',
-      phone: agPhone.trim() || '010-0000-0000',
+      phone: agPhone.trim(),
       isActive: existing ? existing.isActive : true,
     });
     if (res.ok) {
@@ -280,8 +217,8 @@ function doGet(e) {
       loginId: existing?.loginId || `cm.${Date.now()}@autodealer.kr`,
       name: cmName,
       role: 'CM',
-      affiliation: cmAffiliation || '제휴 대리점',
-      phone: cmPhone || '010-0000-0000',
+      affiliation: cmAffiliation,
+      phone: cmPhone,
       businessNumber: cmBusinessNo || undefined,
       rrn: cmRrn || undefined,
       employeeId: cmEmployeeId || undefined,
@@ -728,7 +665,7 @@ function doGet(e) {
                 type="text"
                 value={cmRrn}
                 onChange={(e) => setCmRrn(e.target.value)}
-                placeholder="예: 880101-1234567"
+                placeholder="000000-0000000"
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-slate-900 focus:outline-none"
               />
             </div>
@@ -1064,7 +1001,8 @@ function doGet(e) {
                     좌측 <strong>프로젝트 설정(톱니바퀴) &gt; 스크립트 속성</strong>에 속성 <code className="font-mono">WEBHOOK_TOKEN</code> 추가 (긴 무작위 문자열)
                   </li>
                   <li>
-                    <strong>배포 &gt; 배포 관리 &gt; 편집(연필) &gt; 버전: 새 버전 &gt; 배포</strong> (URL 유지). 처음이면 <strong>새 배포 &gt; 웹 앱 &gt; 액세스: 모든 사용자</strong>
+                    <strong>배포 &gt; 배포 관리 &gt; 편집(연필) &gt; 버전: 새 버전 &gt; 배포</strong> (URL 유지). 처음이면 <strong>새 배포 &gt; 웹 앱 &gt; 액세스: 모든 사용자</strong>.
+                    Drive 권한을 묻으면 <strong>허용</strong> (요율표 이미지를 비공개 Drive 폴더에 저장). <code className="font-mono">10_요율표_이미지</code> 탭은 첫 업로드 때 자동 생성됩니다.
                   </li>
                   <li>
                     Vercel <strong>Settings &gt; Environment Variables</strong>에 <code className="font-mono">GSHEETS_WEBHOOK_URL</code>(웹 앱 URL),{' '}
@@ -1095,31 +1033,19 @@ function doGet(e) {
       </section>
 
       {/* =================================================================== */}
-      {/* 4. 버전 전환 (Ver 1 / Ver 2) 및 초기화 */}
+      {/* 4. 브라우저 캐시 초기화 */}
       {/* =================================================================== */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-sm font-extrabold text-slate-900">
-            앱 버전 전환 및 초기화
+            브라우저 캐시 초기화
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            기존 전체 기능 버전(Ver 1)은 그대로 보존되어 있으며 언제든 전환할 수 있습니다.
+            화면이 이상할 때 사용하세요. 구글 시트 데이터는 그대로 두고 이 브라우저에 남은 임시 저장값만 지웁니다.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setAppVersion('v1');
-              navigate('/transactions');
-            }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
-          >
-            <Layers className="h-3.5 w-3.5" />
-            <span>Ver 1 (전체 기능 버전)으로 전환</span>
-          </button>
-
           {confirmReset ? (
             <div className="inline-flex items-center gap-1.5">
               <button
@@ -1147,7 +1073,7 @@ function doGet(e) {
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>기본 샘플 데이터 복원</span>
+              <span title="구글 시트 데이터는 그대로 두고, 이 브라우저에 남은 캐시만 지운 뒤 시트에서 다시 불러옵니다.">브라우저 캐시 초기화</span>
             </button>
           )}
         </div>

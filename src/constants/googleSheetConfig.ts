@@ -2,6 +2,7 @@ import {
   APPROVAL_STATUS_META,
   CARD_COMPANY_COLORS,
   CardPromotionItem,
+  RateTableImageItem,
   PromotionPaymentMethod,
   RateTableRowItem,
   SPLIT_CARD_COMPANIES,
@@ -62,6 +63,27 @@ export const GOOGLE_SHEET_TABS = {
   },
 } as const;
 
+// 10_요율표_이미지: 웹훅(Apps Script)이 직접 관리하는 탭. 웹앱은 읽기만 하고 등록·삭제는 /api/images 로.
+export const RATE_IMAGE_TAB = '10_요율표_이미지';
+
+export function parseRateImagesFrom2D(rows: unknown[][] = []): RateTableImageItem[] {
+  return rows
+    .slice(1)
+    .map((r) => r.map((c) => String(c ?? '').trim()))
+    .filter((r) => r[0])
+    .map(([id, title, cardCompanyTag, effectiveDate, note, uploadedBy, uploadedAt, fileId, , externalUrl]) => ({
+      id,
+      title,
+      cardCompanyTag: cardCompanyTag || '전 카드사',
+      effectiveDate,
+      note,
+      uploadedBy,
+      uploadedAt,
+      imageUrl: fileId ? `/api/images/file?id=${encodeURIComponent(id)}` : externalUrl || '',
+    }))
+    .reverse(); // 최근 등록이 위로
+}
+
 // 1. 05_요율표_마스터 헤더 및 직렬화/역직렬화
 export const RATE_TABLE_SHEET_HEADERS = [
   '요율행ID',
@@ -85,7 +107,7 @@ export function serializeRateTableTo2D(rows: RateTableRowItem[]): (string | numb
     r.cardCompany,
     CARD_COMPANY_COLORS[r.cardCompany]?.mainHex || '#172a88',
     r.paymentMethod,
-    r.category || '기본',
+    r.category || '일반',
     r.amountTier,
     r.installmentMonths,
     r.cashbackRate,
@@ -104,6 +126,7 @@ export function serializeRateTableToTsv(rows: RateTableRowItem[], includeHeader 
   return target.map((row) => row.map((cell) => String(cell ?? '').replace(/\t|\n/g, ' ')).join('\t')).join('\n');
 }
 
+// 붙여넣기(TSV/CSV) 입력용. 시트에서 받은 2차원 데이터는 parseRateTableFrom2D 사용 (셀 안 줄바꿈 보존).
 export function parseRateTableFromTsv(rawText: string): {
   rows: RateTableRowItem[];
   errors: string[];
@@ -112,11 +135,19 @@ export function parseRateTableFromTsv(rawText: string): {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
+  return parseRateTableFrom2D(lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(','))));
+}
+
+export function parseRateTableFrom2D(table: unknown[][] = []): {
+  rows: RateTableRowItem[];
+  errors: string[];
+} {
+  const lines = table.filter((r) => r.some((c) => String(c ?? '').trim()));
   const rows: RateTableRowItem[] = [];
   const errors: string[] = [];
 
   lines.forEach((line, idx) => {
-    const cols = line.includes('\t') ? line.split('\t') : line.split(',');
+    const cols = line.map((c) => String(c ?? ''));
     const first = (cols[0] || '').trim();
     if (first === '요율행ID' || first.toLowerCase() === 'id' || cols[1] === '카드사') {
       return; // skip header row
@@ -252,6 +283,7 @@ export function serializePromotionsToTsv(promos: CardPromotionItem[], includeHea
     .join('\n');
 }
 
+// 붙여넣기(TSV/CSV) 입력용. 시트에서 받은 2차원 데이터는 parsePromotionsFrom2D 사용 (셀 안 줄바꿈 보존).
 export function parsePromotionsFromTsv(rawText: string): {
   promotions: CardPromotionItem[];
   errors: string[];
@@ -260,11 +292,19 @@ export function parsePromotionsFromTsv(rawText: string): {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
+  return parsePromotionsFrom2D(lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(','))));
+}
+
+export function parsePromotionsFrom2D(table: unknown[][] = []): {
+  promotions: CardPromotionItem[];
+  errors: string[];
+} {
+  const lines = table.filter((r) => r.some((c) => String(c ?? '').trim()));
   const promotions: CardPromotionItem[] = [];
   const errors: string[] = [];
 
   lines.forEach((line, idx) => {
-    const cols = line.includes('\t') ? line.split('\t') : line.split(',');
+    const cols = line.map((c) => String(c ?? ''));
     const first = (cols[0] || '').trim();
     if (first === '프로모션ID' || cols[1] === '카드사') {
       return;
@@ -522,10 +562,6 @@ export function parseTransactionsFrom2D(rows: unknown[][]): {
   return { transactions, legacyRowCount };
 }
 
-export function rows2DToTsv(rows: unknown[][] | undefined): string {
-  return (rows || []).map((r) => r.map((c) => String(c ?? '')).join('\t')).join('\n');
-}
-
 // 웹앱 상태 → 시트 5개 탭 전체 쓰기 명령
 export function buildMasterBatchOps(
   rates: RateTableRowItem[],
@@ -540,25 +576,6 @@ export function buildMasterBatchOps(
     { op: 'write', range: `'${GOOGLE_SHEET_TABS.SPLIT_PAYMENT_DB.title}'!A1`, data: serializeSplitsTo2D(transactions, false) },
     { op: 'write', range: `'${GOOGLE_SHEET_TABS.USER_CM_MASTER.title}'!A1`, data: serializeUsersTo2D(users) },
   ];
-}
-
-export function serializeTransactionsToTsv(
-  transactions: Transaction[],
-  users: User[],
-  hideAgColumnsForCm = false
-): string {
-  const matrix = serializeTransactionsTo2D(transactions, users, hideAgColumnsForCm);
-  return matrix
-    .map((row) =>
-      row
-        .map((cell) =>
-          String(cell ?? '')
-            .replace(/\t/g, ' ')
-            .replace(/\r?\n/g, ' ')
-        )
-        .join('\t')
-    )
-    .join('\n');
 }
 
 // 4. 08_분할결제_상세행_DB 직렬화
@@ -620,7 +637,7 @@ export function serializeSplitsTo2D(
         s.cardCompany,
         CARD_COMPANY_COLORS[s.cardCompany]?.mainHex || '#172a88',
         s.paymentMethod,
-        s.rateCategory || '기본',
+        s.rateCategory || '일반',
         s.amount,
         s.installmentMonths || (isLump ? '1달' : '24개월'),
         s.cashbackRate || 0,
