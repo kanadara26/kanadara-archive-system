@@ -49,7 +49,7 @@
 | **Git 공식 Author / Committer** | `kanadara26 <kanadara2026@gmail.com>` |
 | **연동 Google Spreadsheet ID** | `1fGq9OKWroDBovIlkvdrkYmDFZp-HTkeJem5sirv6vvs` |
 | **스프레드시트 문서명** | `카나다라_오토캐시백_요율표_거래내역_통합마스터_2026` |
-| **시스템 기본 관리자 계정** | ID: `admin` / PW: `[REDACTED]` (`usr-v2-admin`) |
+| **시스템 기본 관리자 계정** | ID: `admin` (`usr-v2-admin`) / 비밀번호는 시트 `09_사용자_CM_마스터` 탭에서만 관리 |
 
 ---
 

@@ -444,16 +444,6 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                 />
               </div>
 
-              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 space-y-1 border border-slate-200/80">
-                <p className="font-bold text-slate-800">기본 발급 계정 안내</p>
-                <p>
-                  · <strong>Ver 2 어드민:</strong> ID <code className="font-mono font-bold text-slate-900">admin</code> / PW <code className="font-mono font-bold text-slate-900">[REDACTED]</code>
-                </p>
-                <p>
-                  · <strong>기본 AG 계정:</strong> ID <code className="font-mono font-bold text-slate-900">ag_jihun</code> / PW <code className="font-mono font-bold text-slate-900">[REDACTED]</code>
-                </p>
-              </div>
-
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"

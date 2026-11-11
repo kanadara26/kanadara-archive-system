@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { resolveWebhookUrl, send } from './_webhook';
+import { getWebhookConfig, MISSING_CONFIG_ERROR, send } from './_webhook';
 
 const SPREADSHEET_ID = '1fGq9OKWroDBovIlkvdrkYmDFZp-HTkeJem5sirv6vvs';
 
@@ -18,15 +18,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return send(res, 405, { ok: false, error: 'Method Not Allowed' });
   }
   try {
+    const config = getWebhookConfig();
+    if (!config) return send(res, 503, { ok: false, error: MISSING_CONFIG_ERROR });
     const body = await readJsonBody(req);
-    const webhookUrl = resolveWebhookUrl(body.webhookUrl);
-    if (!webhookUrl) {
-      return send(res, 503, { ok: false, error: '구글 시트 웹훅 URL이 설정되지 않았습니다.' });
-    }
-    const resp = await fetch(webhookUrl, {
+    const resp = await fetch(config.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ spreadsheetId: SPREADSHEET_ID, batchOps: body.batchOps || [] }),
+      body: JSON.stringify({
+        token: config.token,
+        spreadsheetId: SPREADSHEET_ID,
+        batchOps: body.batchOps || [],
+      }),
     });
     const json = (await resp.json()) as { ok?: boolean; error?: string; syncedAt?: string };
     if (!resp.ok || !json.ok) {

@@ -251,6 +251,7 @@ interface AppContextValue {
   // Google Sheet Master (05_요율표_마스터 / 06_프로모션_마스터 / 07_거래내역_통합마스터 / 08_분할결제_상세행_DB) 연동
   lastMasterSheetSyncedAt: string;
   isSyncingMasterSheet: boolean;
+  isSheetReady: boolean;
   pushAllMasterTabsToGoogleSheet: (
     scopeLabel?: string,
     explicitUsers?: User[],
@@ -309,18 +310,11 @@ try {
     window.localStorage.removeItem('kanadara_v5_drafts_v2');
     window.localStorage.removeItem('kanadara_v5_assignments');
     window.localStorage.removeItem('kanadara_v5_users');
+    window.localStorage.removeItem('kanadara_gsheets_webhook_url');
   }
 } catch {}
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
-
-function getWebhookUrl(): string {
-  return (
-    localStorage.getItem('kanadara_gsheets_webhook_url') ||
-    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
-    ''
-  );
-}
 
 function loadStorage<T>(key: string, fallback: T): T {
   try {
@@ -457,10 +451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 구글 시트 → 웹앱 전체 로드. 실패하면 예외를 던지고 isSheetReady는 그대로 둔다.
   const loadFromSheet = async (): Promise<{ rates: number; promos: number; txs: number; users: number }> => {
-    const webhookUrl = getWebhookUrl();
-    const res = await fetch(
-      `/api/gsheets/pull${webhookUrl ? `?webhookUrl=${encodeURIComponent(webhookUrl)}` : ''}`
-    );
+    const res = await fetch('/api/gsheets/pull');
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.ok) {
       throw new Error(json?.error || `시트 읽기 실패 (HTTP ${res.status})`);
@@ -506,7 +497,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await fetch('/api/gsheets/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchOps, webhookUrl: getWebhookUrl() }),
+      body: JSON.stringify({ batchOps }),
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.ok) {
@@ -696,7 +687,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const login = (loginId: string, password: string): ActionResult => {
     const trimmedId = loginId.trim().toLowerCase();
     const matched = users.find(
-      (u) => u.loginId.toLowerCase() === trimmedId && u.password === password
+      (u) => !!u.password && u.loginId.toLowerCase() === trimmedId && u.password === password
     );
     if (!matched) {
       return {
@@ -2626,6 +2617,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncConditionsFromSheet,
         lastMasterSheetSyncedAt,
         isSyncingMasterSheet,
+        isSheetReady,
         pushAllMasterTabsToGoogleSheet,
         pullRateAndPromotionsFromGoogleSheet,
         importRateTableRowsFromSheetTsv,

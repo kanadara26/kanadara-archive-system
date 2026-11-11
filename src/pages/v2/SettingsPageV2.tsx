@@ -13,7 +13,6 @@ import {
   Globe,
   KeyRound,
   Layers,
-  Link2,
   Plus,
   RotateCcw,
   ShieldCheck,
@@ -36,6 +35,7 @@ export const SettingsPageV2: React.FC = () => {
     quickSwitchUser,
     lastMasterSheetSyncedAt,
     isSyncingMasterSheet,
+    isSheetReady,
     pullRateAndPromotionsFromGoogleSheet,
     pushAllMasterTabsToGoogleSheet,
     importRateTableRowsFromSheetTsv,
@@ -45,19 +45,19 @@ export const SettingsPageV2: React.FC = () => {
   } = useApp();
   const navigate = useNavigate();
 
-  const [gsheetsWebhookUrl, setGsheetsWebhookUrl] = useState<string>(() => {
-    return (
-      localStorage.getItem('kanadara_gsheets_webhook_url') ||
-      (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
-      ''
-    );
-  });
   const [showWebhookGuide, setShowWebhookGuide] = useState<boolean>(false);
   const [hasCopiedCode, setHasCopiedCode] = useState<boolean>(false);
 
-  const APPS_SCRIPT_SNIPPET = `function doPost(e) {
+  const APPS_SCRIPT_SNIPPET = `// 토큰은 [프로젝트 설정 > 스크립트 속성]의 WEBHOOK_TOKEN 값과 일치해야 함 (없으면 모든 요청 거부)
+function checkToken_(token) {
+  var expected = PropertiesService.getScriptProperties().getProperty('WEBHOOK_TOKEN');
+  if (!expected || token !== expected) throw new Error('unauthorized');
+}
+
+function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
+    checkToken_(body.token);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ops = body.batchOps || [];
     for (var i = 0; i < ops.length; i++) {
@@ -93,6 +93,12 @@ export const SettingsPageV2: React.FC = () => {
 }
 
 function doGet(e) {
+  try {
+    checkToken_(e.parameter.token);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheets = ['05_요율표_마스터', '06_카드사별_프로모션_마스터', '07_거래내역_통합마스터', '08_분할결제_상세행_DB', '09_사용자_CM_마스터'];
   var result = {};
@@ -115,21 +121,6 @@ function doGet(e) {
     setTimeout(() => setHasCopiedCode(false), 3000);
   };
 
-  const handleSaveWebhook = () => {
-    const trimmed = gsheetsWebhookUrl.trim();
-    localStorage.setItem('kanadara_gsheets_webhook_url', trimmed);
-    pushToast({
-      type: 'success',
-      title: trimmed ? '웹훅 URL 저장 완료' : '웹훅 연동 해제',
-      description: trimmed
-        ? '배포된 웹앱에서 구글 시트로 실시간 직접 쓰기(Push)가 활성화되었습니다.'
-        : '웹훅 URL이 삭제되었습니다.',
-    });
-    if (trimmed) {
-      // 쓰기 전에 반드시 시트를 먼저 읽어온다 (읽기 성공 시 자동 저장 활성화)
-      pullRateAndPromotionsFromGoogleSheet();
-    }
-  };
 
   const isAdmin = currentUser?.role === 'ADMIN';
   const adminUser = useMemo(
@@ -145,7 +136,7 @@ function doGet(e) {
   const [editingAgId, setEditingAgId] = useState<string | undefined>(undefined);
   const [agName, setAgName] = useState<string>('');
   const [agLoginId, setAgLoginId] = useState<string>('');
-  const [agPassword, setAgPassword] = useState<string>('[REDACTED]');
+  const [agPassword, setAgPassword] = useState<string>('');
   const [agAffiliation, setAgAffiliation] = useState<string>('');
   const [agPhone, setAgPhone] = useState<string>('');
 
@@ -166,7 +157,7 @@ function doGet(e) {
     setEditingAgId(undefined);
     setAgName('');
     setAgLoginId('');
-    setAgPassword('[REDACTED]');
+    setAgPassword('');
     setAgAffiliation('');
     setAgPhone('');
   };
@@ -184,10 +175,14 @@ function doGet(e) {
     e.preventDefault();
     if (!isAdmin) return;
     const existing = editingAgId ? users.find((u) => u.id === editingAgId) : undefined;
+    if (agPassword.trim().length < 8) {
+      pushToast({ type: 'error', title: '비밀번호 확인', description: '비밀번호는 8자 이상 입력해 주세요.' });
+      return;
+    }
     const res = saveUserAccount({
       id: editingAgId,
       loginId: agLoginId.trim(),
-      password: agPassword.trim() || '[REDACTED]',
+      password: agPassword.trim(),
       name: agName.trim(),
       role: 'AG',
       affiliation: agAffiliation.trim() || '카나다라 오토금융팀',
@@ -356,7 +351,7 @@ function doGet(e) {
                 현재 AG 계정({currentUser?.name})으로 접속 중입니다.
               </p>
               <p className="text-xs text-slate-500">
-                AG 계정 신규 발급 및 관리는 어드민 계정(<strong className="font-mono text-slate-800">ID: admin / PW: [REDACTED]</strong>)에서 가능합니다.
+                AG 계정 신규 발급 및 관리는 어드민(ADMIN) 계정에서 가능합니다.
               </p>
             </div>
             {adminUser && (
@@ -443,7 +438,7 @@ function doGet(e) {
                     required
                     value={agPassword}
                     onChange={(e) => setAgPassword(e.target.value)}
-                    placeholder="예: [REDACTED]"
+                    placeholder="8자 이상"
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
                   />
                 </div>
@@ -1011,12 +1006,12 @@ function doGet(e) {
                 </h3>
                 <span
                   className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                    gsheetsWebhookUrl
+                    isSheetReady
                       ? 'bg-emerald-100 text-emerald-800'
                       : 'bg-amber-100 text-amber-800'
                   }`}
                 >
-                  {gsheetsWebhookUrl ? '● 실시간 웹훅 연동 활성화' : '○ 웹훅 미등록 (로컬 미러)'}
+                  {isSheetReady ? '● 시트 연결됨 (자동 저장 중)' : '○ 시트 미연결 (저장 중지)'}
                 </span>
               </div>
               <p className="text-[11px] text-blue-700/80 mt-0.5">
@@ -1033,24 +1028,18 @@ function doGet(e) {
             </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Link2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="url"
-                value={gsheetsWebhookUrl}
-                onChange={(e) => setGsheetsWebhookUrl(e.target.value)}
-                placeholder="https://script.google.com/macros/s/.../exec (배포된 웹 앱 URL 붙여넣기)"
-                className="w-full rounded-lg border border-blue-200 bg-white py-2 pl-9 pr-3 text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
-              />
-            </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <p className="flex-1 text-[11px] text-slate-600">
+              웹훅 URL과 인증 토큰은 보안을 위해 서버(Vercel 환경변수 <code className="font-mono">GSHEETS_WEBHOOK_URL</code>,{' '}
+              <code className="font-mono">GSHEETS_WEBHOOK_TOKEN</code>)에서만 관리합니다.
+            </p>
             <button
               type="button"
-              onClick={handleSaveWebhook}
+              onClick={() => pullRateAndPromotionsFromGoogleSheet()}
               disabled={isSyncingMasterSheet}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-blue-700 shrink-0 transition-colors"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-blue-700 shrink-0 transition-colors disabled:opacity-50"
             >
-              저장 및 시트 즉시 전송
+              시트 연결 테스트 (불러오기)
             </button>
           </div>
 
@@ -1060,13 +1049,20 @@ function doGet(e) {
                 <p className="font-extrabold text-slate-900">간단한 3단계 연동 방법:</p>
                 <ol className="list-decimal list-inside space-y-1 text-slate-600">
                   <li>
-                    사용 중인 구글 스프레드시트 상단 메뉴에서 <strong>확장 프로그램 &gt; Apps Script</strong> 클릭
+                    구글 스프레드시트 상단 메뉴 <strong>확장 프로그램 &gt; Apps Script</strong> 클릭
                   </li>
                   <li>
-                    <strong>기존 Code.gs 코드는 절대 지우실 필요가 없습니다!</strong> 좌측 <strong>파일 추가(+) &gt; 스크립트</strong>를 눌러 <strong>Webhook.gs</strong> 파일을 새로 만들거나, 기존 <strong>Code.gs 파일의 맨 아래</strong>에 그대로 덧붙여 넣고 저장(Ctrl+S)하세요. (기존 시트 등록 버튼과 메뉴가 100% 그대로 유지됩니다)
+                    <strong>Webhook.gs</strong> 파일 내용을 아래 코드로 교체 후 저장(Ctrl+S). 기존 <strong>Code.gs</strong>는 그대로 둡니다.
                   </li>
                   <li>
-                    우측 상단 <strong>배포 &gt; 새 배포</strong> 클릭 &rarr; 유형: <strong>웹 앱</strong> &rarr; 액세스 권한: <strong>모든 사용자</strong> 선택 후 배포 클릭 &rarr; 생성된 웹 앱 URL을 위에 붙여넣기
+                    좌측 <strong>프로젝트 설정(톱니바퀴) &gt; 스크립트 속성</strong>에 속성 <code className="font-mono">WEBHOOK_TOKEN</code> 추가 (긴 무작위 문자열)
+                  </li>
+                  <li>
+                    <strong>배포 &gt; 배포 관리 &gt; 편집(연필) &gt; 버전: 새 버전 &gt; 배포</strong> (URL 유지). 처음이면 <strong>새 배포 &gt; 웹 앱 &gt; 액세스: 모든 사용자</strong>
+                  </li>
+                  <li>
+                    Vercel <strong>Settings &gt; Environment Variables</strong>에 <code className="font-mono">GSHEETS_WEBHOOK_URL</code>(웹 앱 URL),{' '}
+                    <code className="font-mono">GSHEETS_WEBHOOK_TOKEN</code>(같은 토큰) 등록 후 재배포
                   </li>
                 </ol>
               </div>

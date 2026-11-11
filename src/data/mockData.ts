@@ -20,7 +20,7 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'usr-v2-admin',
     loginId: 'admin',
-    password: '[REDACTED]',
+    password: '', // 비밀번호는 구글 시트 09 탭에서만 관리 (빈 값이면 로그인 불가)
     name: '총괄 관리자',
     role: 'ADMIN',
     affiliation: '카나다라 본사 어드민',
