@@ -378,163 +378,119 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
   };
 
 
+  const tabs = [
+    { key: 'DATA' as const, label: '요율표', icon: FileSpreadsheet, count: rateTableRows.length },
+    { key: 'PROMO' as const, label: '프로모션', icon: Gift, count: cardPromotions.length },
+    { key: 'IMAGE' as const, label: '이미지', icon: ImageIcon, count: rateTableImages.length },
+  ];
+  const chipClass = (selected: boolean) =>
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+      selected
+        ? 'border-slate-900 bg-slate-900 text-white'
+        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900'
+    }`;
+  const sheetLinkClass =
+    'inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-slate-500 hover:text-slate-900';
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
-      {/* 상단 헤더 */}
-      <div className="bg-slate-900 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-200">
-            <FileSpreadsheet className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-extrabold tracking-tight">
-                카드사별 요율표 · 프로모션 조견표
-              </h3>
-              {canEdit ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/40">
-                  <ShieldCheck className="w-3 h-3" />
-                  ADMIN 편집 모드
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                  <Lock className="w-3 h-3 text-slate-400" />
-                  조회 전용
-                </span>
-              )}
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+      {/* 헤더: 제목 · 동기화 시각 · 닫기 */}
+      <div className="border-b border-slate-200 px-5 pt-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+              <FileSpreadsheet className="h-4 w-4" />
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              카드사별 금리·캐시백·수수료율 및 프로모션 조견표
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-extrabold tracking-tight text-slate-900">요율표 · 프로모션</h3>
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">
+                  {canEdit ? <ShieldCheck className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                  {canEdit ? '편집 가능' : '조회 전용'}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {GOOGLE_MASTER_SPREADSHEET_TITLE} · 최근 동기화 {lastMasterSheetSyncedAt}
+              </p>
+            </div>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 탭 전환 버튼 (데이터 표 / 카드사 프로모션 / 이미지 형식) */}
-          <div className="inline-flex rounded-xl bg-slate-800/90 p-1 border border-slate-700">
-            <button
-              type="button"
-              onClick={() => setActiveTab('DATA')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'DATA'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              데이터 표 ({rateTableRows.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('PROMO')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'PROMO'
-                  ? 'bg-amber-500 text-slate-950 shadow'
-                  : 'text-amber-300 hover:text-white'
-              }`}
-            >
-              <Gift className="w-3.5 h-3.5" />
-              카드사 프로모션 ({cardPromotions.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('IMAGE')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'IMAGE'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <ImageIcon className="w-3.5 h-3.5" />
-              이미지 ({rateTableImages.length})
-            </button>
-          </div>
-
           {onCloseSplit && (
             <button
               type="button"
               onClick={onCloseSplit}
-              title="2분할 요율표 닫기"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white text-xs font-bold border border-slate-700 transition-colors"
+              aria-label="요율표 닫기"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-900"
             >
-              <X className="w-4 h-4" />
-              닫기
+              <X className="h-5 w-5" />
             </button>
           )}
         </div>
-      </div>
 
-      {/* 실제 구글 시트 마스터 연동 상태 바 & 1-Click 시트 열기 */}
-      <div className="bg-emerald-950/95 text-emerald-100 px-4 py-2 border-b border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-extrabold text-[11px]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Google Sheets 실시간 마스터 연동됨
-          </span>
-          <span className="font-bold text-white truncate max-w-xs sm:max-w-md">
-            {GOOGLE_MASTER_SPREADSHEET_TITLE}
-          </span>
-          <span className="text-[11px] text-emerald-300/90 font-mono">
-            (최근 동기화: {lastMasterSheetSyncedAt})
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <a
-            href={GOOGLE_SHEET_TABS.REGISTRATION_CONSOLE.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] border border-amber-300 transition-colors"
-          >
-            <ExternalLink className="w-3 h-3" />
-            00_등록(GAS)
-          </a>
-          <a
-            href={GOOGLE_SHEET_TABS.RATE_TABLE_MASTER.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-800/80 hover:bg-emerald-700 text-white font-medium text-[11px] border border-emerald-500/40 transition-colors"
-          >
-            <ExternalLink className="w-3 h-3" />
-            05_요율표
-          </a>
-          <a
-            href={GOOGLE_SHEET_TABS.PROMOTION_MASTER.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-800/80 hover:bg-emerald-700 text-white font-medium text-[11px] border border-emerald-500/40 transition-colors"
-          >
-            <ExternalLink className="w-3 h-3" />
-            06_프로모션
-          </a>
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setShowSheetSyncPanel((prev) => !prev)}
-              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md font-bold text-[11px] border transition-all ${
-                showSheetSyncPanel
-                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400/50'
-              }`}
-            >
-              <RefreshCw className={`w-3 h-3 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
-              {showSheetSyncPanel ? '동기화 닫기' : '동기화(Push/Pull)'}
-            </button>
-          )}
+        {/* 탭 + 시트 바로가기 */}
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <div role="tablist" aria-label="요율표 보기 방식" className="-mb-px flex gap-1">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 pb-2.5 pt-1 text-sm font-bold transition-colors ${
+                    isActive
+                      ? 'border-slate-900 text-slate-900'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-slate-600">
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 pb-2.5">
+            <a href={GOOGLE_SHEET_TABS.RATE_TABLE_MASTER.url} target="_blank" rel="noreferrer" className={sheetLinkClass}>
+              요율표 시트 <ExternalLink className="h-3 w-3" />
+            </a>
+            <a href={GOOGLE_SHEET_TABS.PROMOTION_MASTER.url} target="_blank" rel="noreferrer" className={sheetLinkClass}>
+              프로모션 시트 <ExternalLink className="h-3 w-3" />
+            </a>
+            <a href={GOOGLE_SHEET_TABS.REGISTRATION_CONSOLE.url} target="_blank" rel="noreferrer" className={sheetLinkClass}>
+              등록 시트 <ExternalLink className="h-3 w-3" />
+            </a>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setShowSheetSyncPanel((prev) => !prev)}
+                aria-expanded={showSheetSyncPanel}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${
+                  showSheetSyncPanel
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <RefreshCw className={`h-3 w-3 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
+                시트 동기화
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ADMIN 전용: 구글 시트 마스터 실시간 양방향 동기화(Push / Pull / TSV 붙여넣기) 패널 */}
+      {/* ADMIN 전용: 05_요율표 · 06_프로모션 시트와 주고받기 (Pull / Push / TSV 붙여넣기) */}
       {canEdit && showSheetSyncPanel && (
-        <div className="bg-gradient-to-r from-emerald-50 via-teal-50/70 to-indigo-50 border-b-2 border-emerald-300 p-4 space-y-3">
+        <div className="space-y-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
-                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                [ADMIN 전용] 실제 구글 시트 (05_요율표_마스터 · 06_카드사별_프로모션_마스터) 양방향 연동
-              </h4>
-              <p className="text-[11px] text-slate-600 mt-0.5">
-                웹앱에서 수정한 요율표·프로모션(±% 마이너스 반영 포함)을 실제 구글 시트에 즉시 반영(Push)하거나, 구글 시트에서 수정한 행을 불러와(Pull / 붙여넣기) 업데이트합니다.
+              <h4 className="text-sm font-extrabold text-slate-900">구글 시트 동기화</h4>
+              <p className="mt-0.5 text-xs text-slate-500">
+                05_요율표 · 06_프로모션 시트와 웹앱 데이터를 주고받습니다.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -542,19 +498,19 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                 type="button"
                 disabled={isSyncingMasterSheet}
                 onClick={() => pullRateAndPromotionsFromGoogleSheet()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
-                실제 구글 시트에서 불러오기 (Pull)
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncingMasterSheet ? 'animate-spin' : ''}`} />
+                시트에서 불러오기
               </button>
               <button
                 type="button"
                 disabled={isSyncingMasterSheet}
                 onClick={() => pushAllMasterTabsToGoogleSheet('05_요율표 & 06_프로모션 마스터')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100 disabled:opacity-50"
               >
-                <Upload className="w-3.5 h-3.5" />
-                현재 데이터를 구글 시트에 즉시 반영 (Push)
+                <Upload className="h-3.5 w-3.5" />
+                시트에 저장
               </button>
               <button
                 type="button"
@@ -566,91 +522,44 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   navigator.clipboard.writeText(tsv);
                   pushToast({
                     type: 'success',
-                    title: `${
-                      sheetImportTarget === 'RATE'
-                        ? '05_요율표_마스터'
-                        : '06_카드사별_프로모션_마스터'
-                    } 시트 붙여넣기용 TSV 복사 완료`,
+                    title: `${sheetImportTarget === 'RATE' ? '05_요율표_마스터' : '06_카드사별_프로모션_마스터'} TSV 복사 완료`,
                     description: '구글 시트 A1 셀을 선택하고 Ctrl+V를 누르면 표 전체가 그대로 입력됩니다.',
                   });
                 }}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold cursor-pointer"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100"
               >
-                <Copy className="w-3.5 h-3.5 text-indigo-600" />
-                현재 탭 TSV 클립보드 복사
+                <Copy className="h-3.5 w-3.5" />
+                TSV 복사
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-emerald-200 p-3 space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-extrabold text-slate-700">
-                  구글 시트 복사·붙여넣기 대상:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSheetImportTarget('RATE')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
-                    sheetImportTarget === 'RATE'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-slate-50 text-slate-700 border-slate-300'
-                  }`}
-                >
-                  05_요율표_마스터 ({rateTableRows.length}행)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetImportTarget('PROMO')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
-                    sheetImportTarget === 'PROMO'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500'
-                      : 'bg-slate-50 text-slate-700 border-slate-300'
-                  }`}
-                >
-                  06_카드사별_프로모션_마스터 ({cardPromotions.length}건)
-                </button>
-
-                <select
-                  value={sheetImportMode}
-                  onChange={(e) => setSheetImportMode(e.target.value as 'MERGE' | 'REPLACE')}
-                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800"
-                >
-                  <option value="MERGE">기존 데이터에 병합/갱신 (Upsert)</option>
-                  <option value="REPLACE">시트 데이터로 전체 교체 (Replace)</option>
-                </select>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (sheetImportTarget === 'RATE') {
-                    setSheetTsvInput(
-                      'rt-row-sheet-1\t국민\t#faba07\t일시불\t저금리\t3,000만원 이상\t1달\t2.05\t0\t0.88\t0.55\t2026-11-05\t[구글시트연동] KB국민 11월 중순 특판 일시불 상향'
-                    );
-                  } else {
-                    setSheetTsvInput(
-                      'promo-sheet-kb-1\t국민\t#faba07\tKB국민 11월 시트연동 다이렉트할부 저금리(-0.4%) 특판\t2026-11-05\t계속 진행\t다이렉트할부\t25000000\t\t2,500만원 이상\t0\t-0.4\t-0.15\t-0.1\t0\t0\t• 시트 연동 저금리(-0.4%) 특판 / • AG -0.15%, CM -0.10% 마이너스 요율 반영\tTRUE\t2026-11-04 12:30'
-                    );
-                  }
-                }}
-                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
-              >
-                시트 행 샘플 자동채우기
+          <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-500">붙여넣기 대상</span>
+              <button type="button" onClick={() => setSheetImportTarget('RATE')} className={chipClass(sheetImportTarget === 'RATE')}>
+                요율표 ({rateTableRows.length}행)
               </button>
+              <button type="button" onClick={() => setSheetImportTarget('PROMO')} className={chipClass(sheetImportTarget === 'PROMO')}>
+                프로모션 ({cardPromotions.length}건)
+              </button>
+              <select
+                value={sheetImportMode}
+                onChange={(e) => setSheetImportMode(e.target.value as 'MERGE' | 'REPLACE')}
+                aria-label="붙여넣기 방식"
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-800"
+              >
+                <option value="MERGE">기존 데이터에 병합/갱신</option>
+                <option value="REPLACE">시트 데이터로 전체 교체</option>
+              </select>
             </div>
-
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <textarea
                 rows={2}
                 value={sheetTsvInput}
                 onChange={(e) => setSheetTsvInput(e.target.value)}
-                placeholder={
-                  sheetImportTarget === 'RATE'
-                    ? '05_요율표_마스터 시트에서 행을 드래그하여 복사(Ctrl+C)한 뒤 여기에 붙여넣으세요(Ctrl+V)...'
-                    : '06_카드사별_프로모션_마스터 시트에서 행을 복사(Ctrl+C)한 뒤 여기에 붙여넣으세요(Ctrl+V)...'
-                }
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 font-mono text-xs focus:border-emerald-600 focus:outline-none"
+                placeholder={`${sheetImportTarget === 'RATE' ? '05_요율표_마스터' : '06_카드사별_프로모션_마스터'} 시트에서 행을 복사(Ctrl+C)해 붙여넣으세요(Ctrl+V)`}
+                className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 font-mono text-xs focus:border-slate-900 focus:outline-none"
               />
               <button
                 type="button"
@@ -660,76 +569,42 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     sheetImportTarget === 'RATE'
                       ? importRateTableRowsFromSheetTsv(sheetTsvInput, sheetImportMode)
                       : importPromotionsFromSheetTsv(sheetTsvInput, sheetImportMode);
-                  if (res.ok) {
-                    setSheetTsvInput('');
-                  }
+                  if (res.ok) setSheetTsvInput('');
                 }}
-                className="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                className="shrink-0 whitespace-nowrap rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800"
               >
-                시트 붙여넣기 행 즉시 반영
+                붙여넣은 행 반영
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* [요구사항 #3] 카드사별 메인 컬러 한눈에 구분·필터 바 */}
-      <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-extrabold text-slate-600 mr-1">
-            카드사 컬러 구분:
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setCardFilter('ALL');
-            }}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
-              cardFilter === 'ALL'
-                ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-            }`}
-          >
-            전체보기
+      {/* 카드사 필터 (요율표 · 프로모션 탭 공통) */}
+      {activeTab !== 'IMAGE' && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-5 py-3">
+          <button type="button" onClick={() => setCardFilter('ALL')} className={chipClass(cardFilter === 'ALL')}>
+            전체
           </button>
           {SPLIT_CARD_COMPANIES.map((card) => {
-            const cMeta = CARD_COMPANY_COLORS[card];
             const isSelected = cardFilter === card;
             return (
               <button
                 key={card}
                 type="button"
-                onClick={() => {
-                  setCardFilter(isSelected ? 'ALL' : card);
-                }}
-                style={
-                  isSelected
-                    ? {
-                        backgroundColor: cMeta.mainHex,
-                        color: cMeta.badgeTextHex,
-                        borderColor: cMeta.mainHex,
-                      }
-                    : {
-                        backgroundColor: cMeta.softBgHex,
-                        color: cMeta.darkTextHex,
-                        borderColor: cMeta.mainHex,
-                      }
-                }
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all border ${
-                  isSelected ? 'shadow-sm scale-[1.02]' : 'hover:opacity-90'
-                }`}
-                title={`${card} 메인 컬러 (${cMeta.mainHex}) 필터`}
+                onClick={() => setCardFilter(isSelected ? 'ALL' : card)}
+                className={chipClass(isSelected)}
               >
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/15"
-                  style={{ backgroundColor: cMeta.mainHex }}
+                  className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10"
+                  style={{ backgroundColor: CARD_COMPANY_COLORS[card].mainHex }}
                 />
-                <span>{card}</span>
+                {card}
               </button>
             );
           })}
         </div>
-      </div>
+      )}
 
       {/* =====================================================================
           탭 1: 별도 데이터 표 형식 (카드사별 메인 컬러 적용 + 선택 카드사 하이라이트 + ADMIN 전용 수정)
@@ -781,21 +656,21 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
           {showRowForm && canEdit && (
             <form
               onSubmit={handleSaveRow}
-              className={`rounded-xl p-4 space-y-3 border-2 ${
+              className={`rounded-xl p-4 space-y-3 border ${
                 copiedFromRowLabel
-                  ? 'bg-amber-50/80 border-amber-400'
-                  : 'bg-indigo-50/70 border-indigo-200'
+                  ? 'bg-amber-50/60 border-amber-300'
+                  : 'bg-slate-50 border-slate-200'
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {copiedFromRowLabel ? (
-                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2 py-0.5 text-[11px] font-black text-slate-950">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
                       <Copy className="w-3 h-3" />
                       복사하여 신규 등록 모드
                     </span>
                   ) : null}
-                  <span className="text-xs font-extrabold text-indigo-950">
+                  <span className="text-xs font-extrabold text-slate-900">
                     {editingRowId
                       ? '기존 요율 데이터 행 수정 (ADMIN)'
                       : copiedFromRowLabel
@@ -904,7 +779,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   />
                 </div>
                 <div>
-                  <label htmlFor="rt-cashback-input" className="block text-xs font-bold text-blue-700 mb-1">
+                  <label htmlFor="rt-cashback-input" className="block text-xs font-bold text-slate-700 mb-1">
                     캐시백 % (일시불 전용)
                   </label>
                   <input
@@ -914,11 +789,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     value={rowMethod === '일시불' ? rowCashback : '0'}
                     disabled={rowMethod !== '일시불'}
                     onChange={(e) => setRowCashback(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-blue-700"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-slate-700"
                   />
                 </div>
                 <div>
-                  <label htmlFor="rt-interest-input" className="block text-xs font-bold text-amber-700 mb-1">
+                  <label htmlFor="rt-interest-input" className="block text-xs font-bold text-slate-700 mb-1">
                     할부 금리 % (할부 전용)
                   </label>
                   <input
@@ -928,7 +803,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     value={rowMethod === '일시불' ? '0' : rowInterest}
                     disabled={rowMethod === '일시불'}
                     onChange={(e) => setRowInterest(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-amber-700"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-slate-900"
                   />
                 </div>
                 <div>
@@ -945,7 +820,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   />
                 </div>
                 <div>
-                  <label htmlFor="rt-cm-rate-input" className="block text-xs font-bold text-emerald-700 mb-1">
+                  <label htmlFor="rt-cm-rate-input" className="block text-xs font-bold text-slate-700 mb-1">
                     CM 수수료율 (%)
                   </label>
                   <input
@@ -954,7 +829,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     step="0.01"
                     value={rowCmRate}
                     onChange={(e) => setRowCmRate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-emerald-700"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
                   />
                 </div>
               </div>
@@ -977,7 +852,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                 />
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                  className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
                 >
                   <Check className="w-3.5 h-3.5" />
                   {editingRowId
@@ -990,156 +865,122 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
             </form>
           )}
 
-          {/* 데이터 표 (카드사별 메인 컬러 적용) */}
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-            <table className="w-full text-left border-collapse">
+          {/* 데이터 표 */}
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="bg-slate-900 text-white text-[11px] font-bold uppercase">
-                  <th className="py-2.5 px-3">카드사 (전용 컬러)</th>
-                  <th className="py-2.5 px-2.5">결제방법</th>
-                  <th className="py-2.5 px-2.5">적용구간 / 개월</th>
-                  <th className="py-2.5 px-2.5 text-right">캐시백(일시불)</th>
-                  <th className="py-2.5 px-2.5 text-right">금리(할부)</th>
-                    <th className="py-2.5 px-2.5 text-right bg-indigo-950 text-indigo-200">
-                      AG 수수료율
-                    </th>
-                  <th className="py-2.5 px-2.5 text-right bg-emerald-950 text-emerald-200">
-                    CM 수수료율
-                  </th>
-                  <th className="py-2.5 px-3">비고 / 실행일</th>
-                  {canEdit && (
-                    <th className="py-2.5 px-2.5 text-center">동작 (복사·수정·삭제)</th>
-                  )}
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-500">
+                  <th className="whitespace-nowrap px-3 py-2.5">카드사</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5">결제방법</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5">적용구간 / 개월</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">캐시백</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">할부금리</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">AG 수수료</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">CM 수수료</th>
+                  <th className="whitespace-nowrap px-3 py-2.5">비고 / 실행일</th>
+                  {canEdit && <th className="px-2.5 py-2.5 text-right"><span className="sr-only">관리</span></th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 text-xs">
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {filteredRows.length === 0 && (
+                  <tr>
+                    <td colSpan={canEdit ? 9 : 8} className="py-10 text-center text-xs font-semibold text-slate-400">
+                      조건에 맞는 요율이 없습니다.
+                    </td>
+                  </tr>
+                )}
                 {filteredRows.map((row) => {
                   const isLump = row.paymentMethod === '일시불';
-                  const cardColor = CARD_COMPANY_COLORS[row.cardCompany];
-
                   return (
-                    <tr
-                      key={row.id}
-                      style={{ borderLeft: `6px solid ${cardColor.mainHex}` }}
-                      className="transition-colors hover:bg-slate-50/90"
-                    >
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
+                    <tr key={row.id} className="transition-colors hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-slate-900">
                           <span
-                            style={{
-                              backgroundColor: cardColor.mainHex,
-                              color: cardColor.badgeTextHex,
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-black shadow-2xs"
-                          >
-                            {row.cardCompany}
-                          </span>
-                        </div>
+                            className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10"
+                            style={{ backgroundColor: CARD_COMPANY_COLORS[row.cardCompany].mainHex }}
+                          />
+                          {row.cardCompany}
+                        </span>
                       </td>
-                      <td className="py-2.5 px-2.5 whitespace-nowrap">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                              row.paymentMethod === '일시불'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : row.paymentMethod === '다이렉트할부'
-                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                            }`}
-                          >
-                            {row.paymentMethod}
-                          </span>
-                          <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                            {row.category || '일반'}
-                          </span>
-                        </div>
+                      <td className="whitespace-nowrap px-2.5 py-3">
+                        <span className="font-bold text-slate-800">{row.paymentMethod}</span>
+                        <span className="ml-1.5 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">
+                          {row.category || '일반'}
+                        </span>
                       </td>
-                      <td className="py-2.5 px-2.5">
+                      <td className="px-2.5 py-3">
                         <div className="font-bold text-slate-900">{row.amountTier}</div>
-                        <div className="text-[11px] text-slate-500">할부: {row.installmentMonths}</div>
+                        <div className="text-[11px] text-slate-500">{row.installmentMonths}</div>
                       </td>
-                      <td className="py-2.5 px-2.5 text-right font-extrabold whitespace-nowrap">
-                        {isLump ? (
-                          <span className="text-blue-600">{row.cashbackRate.toFixed(2)}%</span>
-                        ) : (
-                          <span className="text-slate-300">-</span>
-                        )}
+                      <td className="whitespace-nowrap px-2.5 py-3 text-right font-extrabold tabular-nums text-slate-900">
+                        {isLump ? `${row.cashbackRate.toFixed(2)}%` : <span className="text-slate-300">-</span>}
                       </td>
-                      <td className="py-2.5 px-2.5 text-right font-extrabold whitespace-nowrap">
-                        {!isLump ? (
-                          <span className="text-amber-700">{row.interestRate.toFixed(2)}%</span>
-                        ) : (
-                          <span className="text-slate-300">-</span>
-                        )}
+                      <td className="whitespace-nowrap px-2.5 py-3 text-right font-extrabold tabular-nums text-slate-900">
+                        {!isLump ? `${row.interestRate.toFixed(2)}%` : <span className="text-slate-300">-</span>}
                       </td>
-                        <td className="py-2.5 px-2.5 text-right font-extrabold text-indigo-700 bg-indigo-50/40 whitespace-nowrap">
-                          {row.agCommissionRate.toFixed(2)}%
-                        </td>
-                      <td className="py-2.5 px-2.5 text-right font-extrabold text-emerald-700 bg-emerald-50/40 whitespace-nowrap">
+                      <td className="whitespace-nowrap px-2.5 py-3 text-right font-bold tabular-nums text-slate-700">
+                        {row.agCommissionRate.toFixed(2)}%
+                      </td>
+                      <td className="whitespace-nowrap px-2.5 py-3 text-right font-bold tabular-nums text-slate-700">
                         {row.cmCommissionRate.toFixed(2)}%
                       </td>
-                      <td className="py-2.5 px-3 text-[11px] text-slate-600">
+                      <td className="px-3 py-3 text-[11px] text-slate-600">
                         <div>{row.remark}</div>
-                        <div className="text-[10px] text-slate-400">실행일: {row.effectiveDate}</div>
+                        <div className="text-slate-400">실행 {row.effectiveDate}</div>
                       </td>
                       {canEdit && (
-                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
-                          <div className="inline-flex items-center gap-1.5">
-                            {canEdit && (
+                        <td className="whitespace-nowrap px-2.5 py-3 text-right">
+                          {confirmDeleteRowId === row.id ? (
+                            <span className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  deleteRateTableRow(row.id);
+                                  setConfirmDeleteRowId(null);
+                                }}
+                                className="text-xs font-bold text-rose-700 hover:underline"
+                              >
+                                삭제
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteRowId(null)}
+                                className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                              >
+                                취소
+                              </button>
+                            </span>
+                          ) : (
+                            <div className="inline-flex items-center gap-0.5">
                               <button
                                 type="button"
                                 onClick={() => openCopyRowForm(row)}
-                                className="inline-flex items-center gap-1 min-h-7 px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                                title="이 요율 행을 그대로 복사하여 필요한 부분만 수정 후 새 행으로 등록합니다"
+                                aria-label="복사해서 새 요율 등록"
+                                title="이 행을 복사해 필요한 부분만 고쳐 새로 등록"
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                               >
-                                <Copy className="w-3.5 h-3.5" />
-                                복사등록
+                                <Copy className="h-4 w-4" />
                               </button>
-                            )}
-                            {canEdit && (
                               <button
                                 type="button"
-                                aria-label="요율 행 직접 수정"
                                 onClick={() => openEditRowForm(row)}
-                                className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-slate-200 text-slate-600 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                                title="기존 요율 행 직접 수정"
+                                aria-label="요율 행 수정"
+                                title="수정"
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                               >
-                                <Edit3 className="w-4 h-4" />
+                                <Edit3 className="h-4 w-4" />
                               </button>
-                            )}
-                            {canEdit &&
-                              (confirmDeleteRowId === row.id ? (
-                                <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-50 border border-rose-200 px-2 py-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      deleteRateTableRow(row.id);
-                                      setConfirmDeleteRowId(null);
-                                    }}
-                                    className="text-xs font-bold text-rose-700 hover:underline"
-                                  >
-                                    삭제확인
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteRowId(null)}
-                                    className="text-xs text-slate-500 hover:text-slate-800"
-                                  >
-                                    취소
-                                  </button>
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  aria-label="요율 행 삭제"
-                                  onClick={() => setConfirmDeleteRowId(row.id)}
-                                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-                                  title="삭제"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              ))}
-                          </div>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteRowId(row.id)}
+                                aria-label="요율 행 삭제"
+                                title="삭제"
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -1158,15 +999,15 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
             <span className="text-xs text-slate-600">
-              상단 카드사 컬러 바에서 카드사를 선택해 필터링하며, <strong>+ % 가산</strong> 및{' '}
-              <strong className="text-rose-600">- % 마이너스 요율 반영</strong>을 모두 지원합니다.
+              위 카드사 필터로 좁혀 볼 수 있습니다. 요율 반영은 <strong>+%</strong>와{' '}
+              <strong className="text-rose-600">-%</strong> 모두 지원합니다.
             </span>
 
             {canEdit && (
               <button
                 type="button"
                 onClick={openNewPromoForm}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black shadow-sm transition-colors"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 카드사 프로모션 추가
@@ -1178,10 +1019,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
           {showPromoForm && canEdit && (
             <form
               onSubmit={handleSavePromo}
-              className={`rounded-xl p-4 space-y-3 border-2 ${
+              className={`rounded-xl p-4 space-y-3 border ${
                 copiedFromPromoLabel
-                  ? 'bg-amber-50/90 border-amber-400'
-                  : 'bg-indigo-50/70 border-indigo-200'
+                  ? 'bg-amber-50/60 border-amber-300'
+                  : 'bg-slate-50 border-slate-200'
               }`}
             >
               <div className="flex items-center justify-between">
@@ -1252,7 +1093,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     <label className="text-[11px] font-bold text-slate-700">
                       마감일 (미지정 시 계속 진행)
                     </label>
-                    <label className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 cursor-pointer">
+                    <label className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={!promoHasEndDate}
@@ -1273,7 +1114,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       type="text"
                       disabled
                       value="마감일 없음 (계속 진행)"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-100 text-xs font-bold text-slate-600"
                     />
                   )}
                 </div>
@@ -1337,19 +1178,19 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
               </div>
 
               {/* [요구사항 2] 기존 캐시백·금리·AG·CM 요율에 + % 또는 - % (마이너스 반영) 설정 */}
-              <div className="rounded-xl border border-rose-200 bg-white p-3 space-y-2.5">
+              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-extrabold text-slate-800">
                     요율 가감 설정 (±% : 양수 입력 시 가산, <strong className="text-rose-600">음수 - 입력 시 기존 캐시백·금리·AG·CM 요율에 마이너스 반영</strong>)
                   </span>
-                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
                     예: -0.20 입력 시 기존 요율에서 -0.20% 차감 반영
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-bold text-blue-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       캐시백 요율 변동 (±%)
                     </label>
                     <input
@@ -1360,11 +1201,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       value={promoCashbackDelta}
                       onChange={(e) => setPromoCashbackDelta(e.target.value)}
                       placeholder="예: -0.20 또는 0.15"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-extrabold text-blue-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-amber-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       할부 금리 변동 (±%)
                     </label>
                     <input
@@ -1375,11 +1216,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       value={promoInterestDelta}
                       onChange={(e) => setPromoInterestDelta(e.target.value)}
                       placeholder="예: -0.50 (금리인하)"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-amber-200 bg-white text-xs font-extrabold text-amber-800"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-900"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-indigo-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       AG 요율 변동 (±%)
                     </label>
                     <input
@@ -1390,11 +1231,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       value={promoAgRate}
                       onChange={(e) => setPromoAgRate(e.target.value)}
                       placeholder="예: 0.15 또는 -0.20"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs font-extrabold text-indigo-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-emerald-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       CM 요율 변동 (±%)
                     </label>
                     <input
@@ -1405,14 +1246,14 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       value={promoCmRate}
                       onChange={(e) => setPromoCmRate(e.target.value)}
                       placeholder="예: 0.10 또는 -0.10"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-white text-xs font-extrabold text-emerald-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <div>
-                    <label className="block text-[11px] font-bold text-indigo-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       AG 추가/차감 인센티브 정액 (원, ± 가능)
                     </label>
                     <input
@@ -1420,11 +1261,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       step="10000"
                       value={promoAgAmount}
                       onChange={(e) => setPromoAgAmount(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs font-bold text-indigo-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-emerald-700 mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       CM 추가/차감 인센티브 정액 (원, ± 가능)
                     </label>
                     <input
@@ -1432,7 +1273,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       step="10000"
                       value={promoCmAmount}
                       onChange={(e) => setPromoCmAmount(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-white text-xs font-bold text-emerald-700"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
                     />
                   </div>
                 </div>
@@ -1455,7 +1296,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
               <div className="flex justify-end">
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-xs font-extrabold text-white"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-xs font-extrabold text-white"
                 >
                   <Check className="w-3.5 h-3.5" />
                   {editingPromoId
@@ -1470,6 +1311,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
 
           {/* 프로모션 카드 목록 (카드사별 메인 컬러 + ±% 마이너스 요율 표시) */}
           <div className="space-y-3">
+            {filteredPromotions.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-xs font-semibold text-slate-400">
+                등록된 프로모션이 없습니다.
+              </p>
+            )}
             {filteredPromotions.map((p) => {
               const cardColor = CARD_COMPANY_COLORS[p.cardCompany];
               const cbDelta = Number(p.cashbackRateDelta) || 0;
@@ -1485,32 +1331,30 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span
-                          style={{
-                            backgroundColor: cardColor.mainHex,
-                            color: cardColor.badgeTextHex,
-                          }}
-                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-xs font-black shadow-2xs"
-                        >
+                        <span className="inline-flex items-center gap-1.5 pr-1 text-xs font-bold text-slate-900">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10"
+                            style={{ backgroundColor: cardColor.mainHex }}
+                          />
                           {p.cardCompany}
                         </span>
                         <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-800">
                           결제방법: {p.paymentMethod}
                         </span>
-                        <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-800 border border-blue-200">
+                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
                           금액조건: {p.amountConditionLabel}
                         </span>
                         <span
                           className={`rounded-md px-2 py-0.5 text-xs font-bold ${
                             p.endDate
                               ? 'bg-slate-100 text-slate-700'
-                              : 'bg-emerald-100 text-emerald-800'
+                              : 'bg-emerald-50 text-emerald-700'
                           }`}
                         >
                           기간: {p.startDate} ~ {p.endDate ? p.endDate : '계속 진행'}
                         </span>
                         {hasNegativeRate && (
-                          <span className="rounded-md bg-rose-100 border border-rose-300 px-2 py-0.5 text-xs font-extrabold text-rose-800">
+                          <span className="rounded-md bg-rose-50 px-2 py-0.5 text-xs font-bold text-rose-700">
                             -% 마이너스 요율 반영
                           </span>
                         )}
@@ -1523,11 +1367,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         <button
                           type="button"
                           onClick={() => openCopyPromoForm(p)}
-                          className="inline-flex items-center gap-1 min-h-7 px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                          title="이 프로모션을 복사하여 필요한 부분만 수정 후 신규 등록"
+                          aria-label="복사해서 새 프로모션 등록"
+                          title="이 프로모션을 복사해 필요한 부분만 고쳐 새로 등록"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                         >
-                          <Copy className="w-3.5 h-3.5" />
-                          복사등록
+                          <Copy className="h-4 w-4" />
                         </button>
                       )}
                       {canEdit && (
@@ -1583,7 +1427,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         className={`rounded-lg border px-2.5 py-1.5 font-extrabold ${
                           cbDelta < 0
                             ? 'bg-rose-50 border-rose-200 text-rose-800'
-                            : 'bg-blue-50 border-blue-200 text-blue-800'
+                            : 'bg-slate-50 border-slate-200 text-slate-800'
                         }`}
                       >
                         캐시백 요율 반영: <strong>{formatSignedRate(cbDelta)}</strong>
@@ -1593,8 +1437,8 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       <div
                         className={`rounded-lg border px-2.5 py-1.5 font-extrabold ${
                           intDelta < 0
-                            ? 'bg-amber-50 border-amber-300 text-amber-900'
-                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                            ? 'bg-rose-50 border-rose-200 text-rose-800'
+                            : 'bg-slate-50 border-slate-200 text-slate-800'
                         }`}
                       >
                         할부 금리 반영: <strong>{formatSignedRate(intDelta)}</strong>
@@ -1604,13 +1448,13 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         className={`rounded-lg border px-3 py-1.5 font-bold ${
                           p.agIncentiveRate < 0 || p.agIncentiveAmount < 0
                             ? 'bg-rose-50 border-rose-200 text-rose-900'
-                            : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-800'
                         }`}
                       >
                         AG 요율 반영:{' '}
                         <strong
                           className={
-                            p.agIncentiveRate < 0 ? 'text-rose-700' : 'text-indigo-700'
+                            p.agIncentiveRate < 0 ? 'text-rose-700' : 'text-slate-900'
                           }
                         >
                           {formatSignedRate(p.agIncentiveRate)}
@@ -1626,13 +1470,13 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       className={`rounded-lg border px-3 py-1.5 font-bold ${
                         p.cmIncentiveRate < 0 || p.cmIncentiveAmount < 0
                           ? 'bg-rose-50 border-rose-200 text-rose-900'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-slate-50 border-slate-200 text-slate-800'
                       }`}
                     >
                       CM 요율 반영:{' '}
                       <strong
                         className={
-                          p.cmIncentiveRate < 0 ? 'text-rose-700' : 'text-emerald-700'
+                          p.cmIncentiveRate < 0 ? 'text-rose-700' : 'text-slate-900'
                         }
                       >
                         {formatSignedRate(p.cmIncentiveRate)}
@@ -1647,7 +1491,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   </div>
 
                   {/* 불릿포인트 장문 설명 */}
-                  <div className="mt-2.5 rounded-lg bg-slate-900/5 border border-slate-200/80 p-3 text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+                  <div className="mt-2.5 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 whitespace-pre-line leading-relaxed">
                     {p.promotionConditionText}
                   </div>
                 </div>
@@ -1670,7 +1514,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
               <button
                 type="button"
                 onClick={() => setShowImageForm((v) => !v)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
               >
                 <Upload className="w-3.5 h-3.5" />
                 요율표 이미지 추가 (ADMIN)
@@ -1681,10 +1525,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
           {showImageForm && canEdit && (
             <form
               onSubmit={handleAddImage}
-              className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-3"
+              className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold text-indigo-950">
+                <span className="text-xs font-extrabold text-slate-900">
                   신규 요율표 이미지 등록 (ADMIN 전용 · 파일 업로드 또는 이미지 URL)
                 </span>
                 <button
@@ -1719,7 +1563,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-indigo-400 bg-white text-xs font-bold text-indigo-700 cursor-pointer hover:bg-indigo-50">
+                <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-white text-xs font-bold text-slate-700 cursor-pointer hover:bg-slate-50">
                   <Upload className="w-4 h-4" />
                   {imgFile ? `선택됨: ${imgFile.name}` : '내 PC에서 요율표 이미지 파일 선택 (PNG/JPG/WebP)'}
                   <input
@@ -1751,7 +1595,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                 <button
                   type="submit"
                   disabled={isUploadingImage}
-                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-60"
+                  className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold disabled:opacity-60"
                 >
                   {isUploadingImage ? '업로드 중…' : '이미지 등록'}
                 </button>
@@ -1769,7 +1613,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   <div className="bg-white px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[11px] font-bold">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-bold">
                           {img.cardCompanyTag}
                         </span>
                         <span className="text-xs font-extrabold text-slate-900">{img.title}</span>
@@ -1831,7 +1675,7 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         setZoomedImageUrl(img.imageUrl);
                       }
                     }}
-                    className="p-3 bg-slate-900 flex justify-center cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    className="p-3 bg-slate-900 flex justify-center cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                   >
                     <img
                       src={img.imageUrl}

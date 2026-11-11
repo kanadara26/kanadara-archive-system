@@ -104,19 +104,19 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* 상단 고정 네비게이션 바 (충분한 상하 여백 py-4 sm:py-5 적용) */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6 sm:py-5">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
           {/* 좌측: 브랜드 로고 (클릭 시 대시보드 이동) + PC 상단 탭 메뉴 */}
-          <div className="flex items-center gap-6 lg:gap-8">
+          <div className="flex min-w-0 items-center gap-4 lg:gap-6">
             <button
               type="button"
               onClick={() => navigate('/v2/dashboard')}
-              className="group flex items-center gap-3 text-left focus-visible:outline-none"
+              className="group flex shrink-0 items-center gap-2.5 text-left focus-visible:outline-none"
               title="대시보드로 이동"
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-base font-black text-white transition-transform group-hover:scale-105">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-base font-black text-white transition-transform group-hover:scale-105">
                 K
               </div>
-              <div className="flex flex-col">
+              <div className="hidden flex-col sm:flex">
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-extrabold tracking-tight text-slate-900">
                     카나다라
@@ -125,30 +125,31 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                     Ver 2
                   </span>
                 </div>
-                <span className="text-[11px] font-medium text-slate-400">
+                <span className="hidden whitespace-nowrap text-[11px] font-medium text-slate-400 xl:block">
                   거래 승인 · 수수료 정산 시스템
                 </span>
               </div>
             </button>
 
             {/* PC 상단 탭 메뉴 */}
-            <nav className="hidden md:flex items-center gap-1.5" aria-label="주요 메뉴">
+            <nav className="hidden md:flex items-center gap-1" aria-label="주요 메뉴">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 return (
                   <NavLink
                     key={item.to}
                     to={item.to}
+                    title={item.label}
                     className={({ isActive }) =>
-                      `inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                      `inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-bold transition-colors lg:px-3.5 ${
                         isActive
                           ? 'bg-slate-900 text-white'
                           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       }`
                     }
                   >
-                    <Icon className="h-4 w-4" />
-                    <span>{item.label}</span>
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.shortLabel}</span>
                     {item.badge !== undefined && (
                       <span className="ml-0.5 rounded-full bg-slate-700 px-1.5 py-0.5 text-[11px] font-bold text-white tabular-nums">
                         {item.badge}
@@ -161,11 +162,11 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
           </div>
 
           {/* 우측: 요율표 · 시트 새로고침 · 계정 메뉴 */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => setRateTableSplitOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
+              className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-slate-50"
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
               <span>요율표</span>
@@ -182,20 +183,20 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
                   setIsRefreshing(false);
                 }}
                 title={`다른 사람이 등록한 거래까지 최신으로 불러옵니다 (3분마다 자동). 최근 동기화: ${lastMasterSheetSyncedAt}`}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-60"
+                aria-label="시트 새로고침"
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-60"
               >
                 {isRefreshing ? (
                   <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-500" aria-hidden="true" />
                 ) : (
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
                 )}
-                <span className="hidden lg:inline">시트 연동됨 · </span>
-                <span>새로고침</span>
+                <span className="hidden sm:inline">새로고침</span>
               </button>
             ) : (
               <span
                 title="구글 시트를 불러오지 못해 저장이 중지된 상태입니다. 설정 > 시트 연결 테스트로 확인하세요."
-                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700"
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl bg-rose-50 px-3 text-xs font-bold text-rose-700"
               >
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>시트 미연결</span>
@@ -207,18 +208,18 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
               <button
                 type="button"
                 onClick={() => setAccountMenuOpen((prev) => !prev)}
-                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                className={`inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-xl border px-3 text-xs font-bold transition-colors ${
                   isAdmin
                     ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
                     : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
                 }`}
               >
                 {isAdmin ? (
-                  <ShieldCheck className="h-4 w-4 text-amber-300" />
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-amber-300" />
                 ) : (
-                  <UserCheck className="h-4 w-4 text-slate-600" />
+                  <UserCheck className="h-4 w-4 shrink-0 text-slate-600" />
                 )}
-                <span className="max-w-[110px] truncate">{currentUser?.name ?? '계정 선택'}</span>
+                <span className="hidden max-w-[110px] truncate lg:inline">{currentUser?.name ?? '계정 선택'}</span>
                 <span
                   className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
                     isAdmin

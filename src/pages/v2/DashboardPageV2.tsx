@@ -18,9 +18,7 @@ import { calcSplitTotals, formatKRW } from '../../utils/format';
 import {
   ArrowRight,
   Check,
-  CheckCircle2,
   CheckSquare,
-  Clock,
   Edit3,
   FilePlus2,
   FolderOpen,
@@ -30,11 +28,6 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-
-const PROGRESS_STEPS: { key: 'WAITING' | 'APPROVED'; label: string }[] = [
-  { key: 'WAITING', label: '요청 대기' },
-  { key: 'APPROVED', label: '카드 승인' },
-];
 
 export const DashboardPageV2: React.FC = () => {
   const {
@@ -60,9 +53,6 @@ export const DashboardPageV2: React.FC = () => {
 
   // 다중 선택 및 일괄 적용 상태
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
-  const [bulkProgressStatus, setBulkProgressStatus] = useState<'NONE' | 'WAITING' | 'APPROVED' | 'REJECTED'>('NONE');
-  const [bulkSettlementStatus, setBulkSettlementStatus] = useState<'NONE' | SettlementProgressStatus>('NONE');
-  const [bulkFeedback, setBulkFeedback] = useState<string | null>(null);
 
   const isAdmin = currentUser?.role === 'ADMIN';
   const agUsers = useMemo(
@@ -163,31 +153,30 @@ export const DashboardPageV2: React.FC = () => {
     );
   };
 
-  const handleApplyBulkStatus = () => {
-    if (selectedTxIds.length === 0) return;
-    if (bulkProgressStatus === 'NONE' && bulkSettlementStatus === 'NONE') return;
-
-    bulkUpdateTransactionsV2(selectedTxIds, {
-      status: bulkProgressStatus !== 'NONE' ? bulkProgressStatus : undefined,
-      settlementStatus: bulkSettlementStatus !== 'NONE' ? bulkSettlementStatus : undefined,
-    });
-
-    const appliedParts: string[] = [];
-    if (bulkProgressStatus !== 'NONE') {
-      appliedParts.push(`진행상황: ${APPROVAL_STATUS_META[bulkProgressStatus].label}`);
-    }
-    if (bulkSettlementStatus !== 'NONE') {
-      appliedParts.push(`정산상황: ${bulkSettlementStatus}`);
-    }
-
-    setBulkFeedback(
-      `선택된 ${selectedTxIds.length}건에 [${appliedParts.join(' / ')}] 일괄 적용되었습니다.`
-    );
-    setSelectedTxIds([]);
-    setBulkProgressStatus('NONE');
-    setBulkSettlementStatus('NONE');
-    setTimeout(() => setBulkFeedback(null), 4000);
-  };
+  const hasSelection = selectedTxIds.length > 0;
+  const bulkGroups: {
+    label: string;
+    items: { key: string; label: string; dot: string; patch: { status?: ApprovalStatus; settlementStatus?: SettlementProgressStatus } }[];
+  }[] = [
+    {
+      label: '진행상황 변경',
+      items: V2_PROGRESS_STATUS_LIST.map((st) => ({
+        key: st,
+        label: APPROVAL_STATUS_META[st].label,
+        dot: APPROVAL_STATUS_META[st].dotClass,
+        patch: { status: st },
+      })),
+    },
+    {
+      label: '정산상황 변경',
+      items: SETTLEMENT_PROGRESS_STATUS_LIST.map((sst) => ({
+        key: sst,
+        label: SETTLEMENT_PROGRESS_STATUS_META[sst].label,
+        dot: SETTLEMENT_PROGRESS_STATUS_META[sst].dotClass,
+        patch: { settlementStatus: sst },
+      })),
+    },
+  ];
 
   const handleStartNewRegister = () => {
     setEditingTxIdV2(null);
@@ -358,7 +347,7 @@ export const DashboardPageV2: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              진행상황(요청 대기 / 카드 승인 / 반려)과 정산상황(정산 대기 / 정산 완료 / 지급 완료(CM))을 개별 또는 다중 선택으로 일괄 변경할 수 있습니다.
+              거래를 체크한 뒤 상단 바에서 진행상황·정산상황을 한 번에 바꿀 수 있습니다. 거래를 누르면 상세 정보가 열립니다.
             </p>
           </div>
 
@@ -476,130 +465,57 @@ export const DashboardPageV2: React.FC = () => {
           </div>
         </div>
 
-        {/* ================================================================= */}
-        {/* 다중 선택 및 진행상황 · 정산상황 일괄 적용 컨트롤 바 */}
-        {/* ================================================================= */}
-        <div
-          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-3.5 transition-colors ${
-            selectedTxIds.length > 0
-              ? 'border-slate-900 bg-slate-900 text-white'
-              : 'border-slate-200 bg-slate-50 text-slate-800'
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleToggleSelectAll}
-              disabled={filteredList.length === 0}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-extrabold border transition-colors disabled:opacity-40 ${
-                selectedTxIds.length > 0
-                  ? 'border-white/25 bg-white/10 text-white hover:bg-white/20'
-                  : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-100'
-              }`}
-            >
-              {isAllFilteredSelected ? (
-                <CheckSquare className="h-4 w-4" />
-              ) : (
-                <Square className="h-4 w-4" />
-              )}
-              <span>{isAllFilteredSelected ? '전체 선택 해제' : '목록 전체 선택'}</span>
-            </button>
-
-            <span className="text-xs font-bold tabular-nums">
-              {selectedTxIds.length > 0
-                ? `${selectedTxIds.length}건 선택됨 — 우측에서 일괄 적용할 상태를 선택하세요`
-                : '거래 좌측 체크박스를 선택하여 진행상황 및 정산상황을 일괄 적용할 수 있습니다.'}
-            </span>
-
-            {selectedTxIds.length > 0 && (
+        {/* 일괄 변경 바: 스크롤해도 헤더 바로 아래에 고정. 체크한 거래에 버튼을 누르는 즉시 적용 */}
+        <div className="sticky top-[65px] z-20 -mx-5 border-y border-slate-200 bg-white/95 px-5 py-3 backdrop-blur-xs">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedTxIds([])}
-                className="text-xs font-semibold text-slate-300 underline hover:text-white"
+                onClick={handleToggleSelectAll}
+                disabled={filteredList.length === 0}
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-800 hover:bg-slate-100 disabled:opacity-40"
               >
-                선택 초기화
+                {isAllFilteredSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                <span>{isAllFilteredSelected ? '선택 해제' : '전체 선택'}</span>
               </button>
-            )}
-          </div>
+              <span className={`whitespace-nowrap text-xs font-bold tabular-nums ${hasSelection ? 'text-slate-900' : 'text-slate-400'}`}>
+                {hasSelection ? `${selectedTxIds.length}건 선택됨` : '거래를 체크한 뒤 상태를 누르세요'}
+              </span>
+              {hasSelection && !isAllFilteredSelected && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTxIds([])}
+                  className="whitespace-nowrap text-[11px] font-semibold text-slate-400 underline hover:text-slate-700"
+                >
+                  해제
+                </button>
+              )}
+            </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label="일괄 적용할 진행상황 선택"
-              value={bulkProgressStatus}
-              onChange={(e) =>
-                setBulkProgressStatus(
-                  e.target.value as 'NONE' | 'WAITING' | 'APPROVED' | 'REJECTED'
-                )
-              }
-              className={`rounded-lg border px-3 py-1.5 text-xs font-extrabold focus:outline-none ${
-                selectedTxIds.length > 0
-                  ? 'border-white/25 bg-slate-800 text-white'
-                  : 'border-slate-300 bg-white text-slate-800'
-              }`}
-            >
-              <option value="NONE">진행상황 일괄 선택 (변경 안 함)</option>
-              {V2_PROGRESS_STATUS_LIST.map((st) => (
-                <option key={st} value={st}>
-                  진행상황 → {APPROVAL_STATUS_META[st].label}
-                </option>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 lg:ml-auto">
+              {bulkGroups.map((group) => (
+                <div key={group.label} className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-2">
+                  <span className="whitespace-nowrap text-[11px] font-extrabold text-slate-500">{group.label}</span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                    {group.items.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        disabled={!hasSelection}
+                        onClick={() => bulkUpdateTransactionsV2(selectedTxIds, item.patch)}
+                        title={hasSelection ? `선택한 ${selectedTxIds.length}건을 [${item.label}](으)로 변경` : '먼저 거래를 선택하세요'}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-bold text-slate-700 transition-colors enabled:hover:bg-white enabled:hover:text-slate-900 enabled:hover:shadow-2xs disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </select>
-
-            <select
-              aria-label="일괄 적용할 정산상황 선택"
-              value={bulkSettlementStatus}
-              onChange={(e) =>
-                setBulkSettlementStatus(e.target.value as 'NONE' | SettlementProgressStatus)
-              }
-              className={`rounded-lg border px-3 py-1.5 text-xs font-extrabold focus:outline-none ${
-                selectedTxIds.length > 0
-                  ? 'border-white/25 bg-slate-800 text-white'
-                  : 'border-slate-300 bg-white text-slate-800'
-              }`}
-            >
-              <option value="NONE">정산상황 일괄 선택 (변경 안 함)</option>
-              {SETTLEMENT_PROGRESS_STATUS_LIST.map((sst) => (
-                <option key={sst} value={sst}>
-                  정산상황 → {SETTLEMENT_PROGRESS_STATUS_META[sst].label}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={handleApplyBulkStatus}
-              disabled={
-                selectedTxIds.length === 0 ||
-                (bulkProgressStatus === 'NONE' && bulkSettlementStatus === 'NONE')
-              }
-              className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-extrabold transition-colors disabled:opacity-40 ${
-                selectedTxIds.length > 0
-                  ? 'bg-white text-slate-900 hover:bg-slate-100'
-                  : 'bg-slate-900 text-white hover:bg-slate-800'
-              }`}
-            >
-              <Check className="h-3.5 w-3.5 stroke-[2.5]" />
-              <span>선택 {selectedTxIds.length}건 일괄 적용</span>
-            </button>
+            </div>
           </div>
         </div>
-
-        {/* 일괄 적용 완료 알림 */}
-        {bulkFeedback && (
-          <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-900">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              <span>{bulkFeedback}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setBulkFeedback(null)}
-              className="text-emerald-700 hover:text-emerald-950"
-            >
-              닫기
-            </button>
-          </div>
-        )}
 
         {/* 거래 승인건 및 진행·정산상황 리스트 */}
         {filteredList.length === 0 ? (
@@ -637,219 +553,92 @@ export const DashboardPageV2: React.FC = () => {
                 <div
                   key={tx.id}
                   onClick={() => setSelectedTx(tx)}
-                  className={`cursor-pointer rounded-xl border p-4 transition-all space-y-3 ${
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${
                     isChecked
-                      ? 'border-slate-900 bg-slate-50/70 ring-1 ring-slate-900'
+                      ? 'border-slate-900 bg-slate-50 ring-1 ring-slate-900'
                       : 'border-slate-200 bg-white hover:border-slate-400'
                   }`}
                 >
-                  {/* 상단 줄: 다중선택 체크박스 + 카드사/고객명/CM + 우측 금액/진행상황/정산상황 변경 */}
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* 다중 선택 체크박스 */}
-                      <button
-                        type="button"
-                        aria-label={`${tx.customerName} 거래 선택`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleSelectTx(tx.id);
-                        }}
-                        className={`flex h-6 w-6 items-center justify-center rounded-md border transition-colors ${
-                          isChecked
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-300 bg-white text-transparent hover:border-slate-500'
-                        }`}
-                      >
-                        <Check className="h-3.5 w-3.5 stroke-[3]" />
-                      </button>
+                  {/* 다중 선택 체크박스 (상태 변경은 상단 고정 바에서) */}
+                  <button
+                    type="button"
+                    aria-label={`${tx.customerName} 거래 선택`}
+                    aria-pressed={isChecked}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleSelectTx(tx.id);
+                    }}
+                    className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                      isChecked
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-300 bg-white text-transparent hover:border-slate-500'
+                    }`}
+                  >
+                    <Check className="h-3.5 w-3.5 stroke-[3]" />
+                  </button>
 
-                      {/* 카드사 뱃지 (첨부 로고 우선 노출) */}
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-extrabold text-slate-900">
-                        {cardLogoUrl ? (
-                          <img
-                            src={cardLogoUrl}
-                            alt={cardDisplayName}
-                            className="h-4 w-4 object-contain"
-                          />
-                        ) : (
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: cardColor.mainHex }}
-                          />
-                        )}
-                        {cardDisplayName}
-                      </span>
-
-                      <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                        {methodSummary}
-                      </span>
-
-                      <span className="text-sm font-black text-slate-900">
-                        {tx.customerName} 고객
-                      </span>
-
-                      <span className="text-xs font-semibold text-slate-500">
-                        · 담당 CM: {tx.cmProfile.name} ({tx.cmProfile.affiliation})
-                      </span>
-
-                      <span className="text-[11px] font-mono text-slate-400">
-                        {tx.id} · 작성일 {tx.requestDate} · 승인일{' '}
-                        <strong
-                          className={
-                            tx.approvalDate ? 'text-slate-700' : 'text-slate-400 font-normal'
-                          }
-                        >
-                          {tx.approvalDate || '대기(미기록)'}
-                        </strong>
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between lg:justify-end gap-2.5">
-                      <div className="text-right tabular-nums mr-1">
-                        <span className="text-sm font-black text-slate-900 block">
-                          {formatKRW(calc.totalAmount)}
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          AG {formatKRW(calc.totalAgCommission)} · CM{' '}
-                          {formatKRW(calc.totalCmCommission)}
-                        </span>
-                      </div>
-
-                      {/* 진행상황 배지 및 즉시 변경 드롭다운 (요청 대기 / 카드 승인 / 반려) */}
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <select
-                          aria-label={`${tx.customerName} 거래 진행상황 변경`}
-                          value={normProgress}
-                          onChange={(e) =>
-                            quickChangeTransactionStatus(
-                              tx.id,
-                              e.target.value as ApprovalStatus
-                            )
-                          }
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-extrabold cursor-pointer focus:outline-none ${statusMeta.badgeClass}`}
-                        >
-                          {V2_PROGRESS_STATUS_LIST.map((st) => (
-                            <option key={st} value={st} className="bg-white text-slate-900">
-                              진행상황: {APPROVAL_STATUS_META[st].label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* 정산상황 배지 및 즉시 변경 드롭다운 (정산 대기 / 정산 완료 / 지급 완료(CM)) */}
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <select
-                          aria-label={`${tx.customerName} 거래 정산상황 변경`}
-                          value={settlementSt}
-                          onChange={(e) =>
-                            quickChangeTransactionSettlementStatus(
-                              tx.id,
-                              e.target.value as SettlementProgressStatus
-                            )
-                          }
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-extrabold cursor-pointer focus:outline-none ${settlementMeta.badgeClass}`}
-                        >
-                          {SETTLEMENT_PROGRESS_STATUS_LIST.map((sst) => (
-                            <option key={sst} value={sst} className="bg-white text-slate-900">
-                              정산상황: {SETTLEMENT_PROGRESS_STATUS_META[sst].label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 비고(requestMemo) 작성 시 거래승인건 카드에 즉시 노출 */}
-                  {tx.requestMemo && tx.requestMemo.trim() !== '' && (
-                    <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800">
-                      <MessageSquareText className="h-3.5 w-3.5 text-slate-500 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-extrabold text-slate-900 mr-1.5">비고:</span>
-                        <span className="font-medium text-slate-700">{tx.requestMemo}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 하단 줄: 진행상황 + 정산상황 요약 바 */}
-                  <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-4 flex-1">
-                      {/* 진행상황 표시 */}
-                      {normProgress === 'REJECTED' ? (
-                        <div className="flex items-center gap-2 text-xs font-bold text-rose-600">
-                          <span className="h-2 w-2 rounded-full bg-rose-500" />
-                          <span>반려됨: {tx.rejectionReason || '심사 기준 미충족'}</span>
+                  <div className="min-w-0 flex-1 space-y-2.5">
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-extrabold text-slate-900">
+                            {cardLogoUrl ? (
+                              <img src={cardLogoUrl} alt="" className="h-4 w-4 object-contain" />
+                            ) : (
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: cardColor.mainHex }} />
+                            )}
+                            {cardDisplayName}
+                          </span>
+                          <span className="whitespace-nowrap rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                            {methodSummary}
+                          </span>
+                          <span className="text-sm font-black text-slate-900">{tx.customerName} 고객</span>
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold text-slate-400">진행</span>
-                          <div className="flex items-center gap-1.5">
-                            {PROGRESS_STEPS.map((step, idx) => {
-                              const currentIdx = normProgress === 'APPROVED' ? 1 : 0;
-                              const isDone = idx <= currentIdx;
-                              const isCurrent = idx === currentIdx;
-                              return (
-                                <React.Fragment key={step.key}>
-                                  <span
-                                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ${
-                                      isCurrent
-                                        ? 'bg-slate-900 text-white font-extrabold'
-                                        : isDone
-                                        ? 'bg-slate-200 text-slate-700 font-bold'
-                                        : 'bg-slate-100 text-slate-400 font-medium'
-                                    }`}
-                                  >
-                                    {isCurrent ? (
-                                      <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                    ) : isDone ? (
-                                      <Clock className="h-3 w-3 shrink-0" />
-                                    ) : null}
-                                    {step.label}
-                                  </span>
-                                  {idx < PROGRESS_STEPS.length - 1 && (
-                                    <span className="text-slate-300 text-[10px]">→</span>
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                        <p className="text-xs text-slate-500">
+                          담당 CM <strong className="font-bold text-slate-700">{tx.cmProfile.name}</strong>
+                          {tx.cmProfile.affiliation && ` (${tx.cmProfile.affiliation})`}
+                        </p>
+                        <p className="font-mono text-[11px] text-slate-400">
+                          {tx.id} · 작성 {tx.requestDate} · 승인{' '}
+                          <span className={tx.approvalDate ? 'font-bold text-slate-700' : ''}>
+                            {tx.approvalDate || '대기'}
+                          </span>
+                        </p>
+                      </div>
 
-                      {/* 정산상황 표시 */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-400">정산</span>
-                        <div className="flex items-center gap-1.5">
-                          {SETTLEMENT_PROGRESS_STATUS_LIST.map((sst, idx) => {
-                            const currentSIdx =
-                              SETTLEMENT_PROGRESS_STATUS_LIST.indexOf(settlementSt);
-                            const isDone = idx <= currentSIdx;
-                            const isCurrent = idx === currentSIdx;
-                            return (
-                              <React.Fragment key={sst}>
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ${
-                                    isCurrent
-                                      ? 'bg-slate-800 text-white font-extrabold'
-                                      : isDone
-                                      ? 'bg-slate-200 text-slate-700 font-bold'
-                                      : 'bg-slate-100 text-slate-400 font-medium'
-                                  }`}
-                                >
-                                  {sst}
-                                </span>
-                                {idx < SETTLEMENT_PROGRESS_STATUS_LIST.length - 1 && (
-                                  <span className="text-slate-300 text-[10px]">→</span>
-                                )}
-                              </React.Fragment>
-                            );
-                          })}
+                      {/* 우측: 진행·정산상황 배지 + 금액 */}
+                      <div className="flex shrink-0 flex-row-reverse items-center justify-between gap-2 sm:flex-col sm:items-end">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-extrabold ${statusMeta.badgeClass}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${statusMeta.dotClass}`} />
+                            {statusMeta.label}
+                          </span>
+                          <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-extrabold ${settlementMeta.badgeClass}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${settlementMeta.dotClass}`} />
+                            {settlementMeta.label}
+                          </span>
+                        </div>
+                        <div className="tabular-nums sm:text-right">
+                          <span className="block text-sm font-black text-slate-900">{formatKRW(calc.totalAmount)}</span>
+                          <span className="text-[11px] text-slate-500">
+                            AG {formatKRW(calc.totalAgCommission)} · CM {formatKRW(calc.totalCmCommission)}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <span className="text-[11px] font-semibold text-slate-400 shrink-0 self-end sm:self-center">
-                      상세 보기 →
-                    </span>
+                    {normProgress === 'REJECTED' && (
+                      <p className="text-xs font-bold text-rose-600">
+                        반려 사유: {tx.rejectionReason || '심사 기준 미충족'}
+                      </p>
+                    )}
+
+                    {tx.requestMemo && tx.requestMemo.trim() !== '' && (
+                      <div className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                        <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span>{tx.requestMemo}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
