@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AgCmAssignment,
   AppliedPromotionSnapshot,
@@ -48,14 +48,13 @@ import {
 import {
   GOOGLE_MASTER_SPREADSHEET_ID,
   GOOGLE_MASTER_SPREADSHEET_TITLE,
+  GOOGLE_SHEET_TABS,
+  buildMasterBatchOps,
   parsePromotionsFromTsv,
   parseRateTableFromTsv,
+  parseTransactionsFrom2D,
   parseUsersFrom2D,
-  serializePromotionsTo2D,
-  serializeRateTableTo2D,
-  serializeSplitsTo2D,
-  serializeTransactionsTo2D,
-  serializeUsersTo2D,
+  rows2DToTsv,
 } from '../constants/googleSheetConfig';
 
 export interface ToastMessage {
@@ -315,6 +314,14 @@ try {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
+function getWebhookUrl(): string {
+  return (
+    localStorage.getItem('kanadara_gsheets_webhook_url') ||
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
+    ''
+  );
+}
+
 function loadStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -444,56 +451,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSyncingMasterSheet, setIsSyncingMasterSheet] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  useEffect(() => {
-    // 구형 더미 캐시 청소
-    try {
-      localStorage.removeItem(STORAGE_KEYS.RATE_ROWS);
-      localStorage.removeItem('kanadara_v5_rate_rows');
-    } catch {
-      // ignore
+  // 시트를 정상적으로 읽어온 뒤에만 시트 쓰기를 허용 (빈/구형 브라우저 상태로 시트를 덮어쓰는 사고 방지)
+  const [isSheetReady, setIsSheetReady] = useState<boolean>(false);
+  const lastPushedKeyRef = useRef<string>('');
+
+  // 구글 시트 → 웹앱 전체 로드. 실패하면 예외를 던지고 isSheetReady는 그대로 둔다.
+  const loadFromSheet = async (): Promise<{ rates: number; promos: number; txs: number; users: number }> => {
+    const webhookUrl = getWebhookUrl();
+    const res = await fetch(
+      `/api/gsheets/pull${webhookUrl ? `?webhookUrl=${encodeURIComponent(webhookUrl)}` : ''}`
+    );
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.error || `시트 읽기 실패 (HTTP ${res.status})`);
+    }
+    const tabs = json.data as Record<string, unknown[][]>;
+
+    const txResult = parseTransactionsFrom2D(tabs[GOOGLE_SHEET_TABS.TRANSACTION_MASTER.title] || []);
+    if (txResult.legacyRowCount > 0) {
+      throw new Error(
+        `07_거래내역 탭에 웹앱원본데이터(JSON)가 없는 거래 ${txResult.legacyRowCount}건이 있어 복원할 수 없습니다. 시트 데이터를 지키기 위해 자동 저장을 중지합니다.`
+      );
+    }
+    const sheetRates = parseRateTableFromTsv(rows2DToTsv(tabs[GOOGLE_SHEET_TABS.RATE_TABLE_MASTER.title])).rows;
+    const sheetPromos = parsePromotionsFromTsv(rows2DToTsv(tabs[GOOGLE_SHEET_TABS.PROMOTION_MASTER.title])).promotions;
+    const sheetUsers = parseUsersFrom2D(
+      (tabs[GOOGLE_SHEET_TABS.USER_CM_MASTER.title] || []) as (string | number)[][]
+    );
+
+    // 거래는 시트가 원본. 시트에 없는 이 브라우저 전용 거래는 지우지 않고 백업만 남긴다.
+    const sheetTxIds = new Set(txResult.transactions.map((t) => t.id));
+    const localOnly = transactions.filter((t) => !sheetTxIds.has(t.id));
+    if (localOnly.length > 0) {
+      localStorage.setItem(`kanadara_local_only_tx_backup_${Date.now()}`, JSON.stringify(localOnly));
     }
 
-    // 앱 초기 실행 시 public/gsheets_live_mirror.json에서 시트 백업 데이터를 읽어 실시간 동기화
-    fetch('/gsheets_live_mirror.json')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!data || !data.batchOps) return;
-        const ops = data.batchOps as Array<{ range?: string; data?: (string | number)[][] }>;
+    const nextRates = sheetRates.length > 0 ? sheetRates : rateTableRows;
+    const nextPromos = sheetPromos.length > 0 ? sheetPromos : cardPromotions;
+    const nextUsers = sheetUsers.length > 0 ? sheetUsers : users;
+    const nextTxs = normalizeStoredTransactions(txResult.transactions);
 
-        // 05_요율표_마스터 실시간 동기화
-        const rateOp = ops.find((o) => String(o.range || '').includes('05_요율표_마스터'));
-        if (rateOp && rateOp.data && rateOp.data.length > 1) {
-          const rateTsv = rateOp.data
-            .map((r: unknown[]) => (r as unknown[]).map((c) => String(c ?? '')).join('\t'))
-            .join('\n');
-          const parsed = parseRateTableFromTsv(rateTsv);
-          if (parsed.rows.length > 0) {
-            setRateTableRows(parsed.rows);
-          }
-        }
+    setRateTableRows(nextRates);
+    setCardPromotions(nextPromos);
+    setUsers(nextUsers);
+    setTransactions(nextTxs);
+    lastPushedKeyRef.current = JSON.stringify(
+      buildMasterBatchOps(nextRates, nextPromos, nextTxs, nextUsers)
+    );
+    setIsSheetReady(true);
+    return { rates: nextRates.length, promos: nextPromos.length, txs: nextTxs.length, users: nextUsers.length };
+  };
 
-        // 06_카드사별_프로모션_마스터 실시간 동기화
-        const promoOp = ops.find((o) => String(o.range || '').includes('06_카드사별_프로모션_마스터'));
-        if (promoOp && promoOp.data && promoOp.data.length > 1) {
-          const promoTsv = promoOp.data
-            .map((r: unknown[]) => (r as unknown[]).map((c) => String(c ?? '')).join('\t'))
-            .join('\n');
-          const parsed = parsePromotionsFromTsv(promoTsv);
-          if (parsed.promotions.length > 0) {
-            setCardPromotions(parsed.promotions);
-          }
-        }
+  const pushBatchToSheet = async (batchOps: ReturnType<typeof buildMasterBatchOps>) => {
+    const res = await fetch('/api/gsheets/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchOps, webhookUrl: getWebhookUrl() }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.error || `시트 저장 실패 (HTTP ${res.status})`);
+    }
+    lastPushedKeyRef.current = JSON.stringify(batchOps);
+  };
 
-        // 09_사용자_CM_마스터 실시간 동기화 (구글 시트가 단일 진실 공급원)
-        const userOp = ops.find((o) => String(o.range || '').includes('09_사용자_CM_마스터'));
-        if (userOp && userOp.data && userOp.data.length > 1) {
-          const parsed = parseUsersFrom2D(userOp.data);
-          if (parsed.length > 0) {
-            setUsers(parsed);
-          }
-        }
-      })
-      .catch(() => {});
+  useEffect(() => {
+    loadFromSheet().catch((err) => {
+      pushToast({
+        type: 'error',
+        title: '구글 시트 연결 실패 — 시트 저장 중지됨',
+        description: err instanceof Error ? err.message : String(err),
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2251,63 +2281,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // 웹앱 내 요율표(rateTableRows) · 프로모션(cardPromotions) · 거래내역(transactions) 변경 시
-  // 로컬 브리지(/api/gsheets/push)를 통해 실제 구글 시트 마스터와 자동 백그라운드 동기화 수행
+  // 웹앱 데이터 변경 시 구글 시트에 자동 저장. 시트 로드 전에는 절대 쓰지 않고, 바뀐 게 없으면 건너뜀.
   useEffect(() => {
+    if (!isSheetReady) return;
     const timer = window.setTimeout(async () => {
+      const batchOps = buildMasterBatchOps(rateTableRows, cardPromotions, transactions, users);
+      if (JSON.stringify(batchOps) === lastPushedKeyRef.current) return;
       try {
-        const batchOps = [
-          {
-            op: 'write',
-            range: "'05_요율표_마스터'!A1",
-            data: serializeRateTableTo2D(rateTableRows),
-          },
-          {
-            op: 'write',
-            range: "'06_카드사별_프로모션_마스터'!A1",
-            data: serializePromotionsTo2D(cardPromotions),
-          },
-          {
-            op: 'write',
-            range: "'07_거래내역_통합마스터'!A1",
-            data: serializeTransactionsTo2D(transactions, users, false),
-          },
-          {
-            op: 'write',
-            range: "'08_분할결제_상세행_DB'!A1",
-            data: serializeSplitsTo2D(transactions, false),
-          },
-          {
-            op: 'write',
-            range: "'09_사용자_CM_마스터'!A1",
-            data: serializeUsersTo2D(users),
-          },
-        ];
-        const webhookUrl =
-          localStorage.getItem('kanadara_gsheets_webhook_url') ||
-          (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
-          '';
-        if (webhookUrl) {
-          try {
-            await fetch(webhookUrl, {
-              method: 'POST',
-              mode: 'no-cors',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ batchOps, spreadsheetId: GOOGLE_MASTER_SPREADSHEET_ID }),
-            });
-          } catch {}
-        }
-        await fetch('/api/gsheets/push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchOps, webhookUrl }),
+        await pushBatchToSheet(batchOps);
+      } catch (err) {
+        pushToast({
+          type: 'error',
+          title: '구글 시트 자동 저장 실패',
+          description: err instanceof Error ? err.message : String(err),
         });
-      } catch {
-        // Ignore network errors in static/offline environments
       }
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [rateTableRows, cardPromotions, transactions, users]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSheetReady, rateTableRows, cardPromotions, transactions, users]);
 
   const pushAllMasterTabsToGoogleSheet = async (
     scopeLabel = '통합 마스터시트 5개 탭 전체',
@@ -2316,6 +2308,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     explicitRateRows?: RateTableRowItem[],
     explicitPromotions?: CardPromotionItem[]
   ): Promise<ActionResult> => {
+    if (!isSheetReady) {
+      pushToast({
+        type: 'error',
+        title: '구글 시트 저장 불가',
+        description: '시트를 아직 불러오지 못했습니다. [시트 불러오기]를 먼저 성공시킨 뒤 다시 시도해 주세요.',
+      });
+      return { ok: false, message: '시트 미연결 상태에서는 저장할 수 없습니다.' };
+    }
     setIsSyncingMasterSheet(true);
     const now = nowFormatted();
     const targetUsers = explicitUsers ?? users;
@@ -2324,59 +2324,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetPromos = explicitPromotions ?? cardPromotions;
 
     try {
-      const batchOps = [
-        {
-          op: 'write',
-          range: "'05_요율표_마스터'!A1",
-          data: serializeRateTableTo2D(targetRates),
-        },
-        {
-          op: 'write',
-          range: "'06_카드사별_프로모션_마스터'!A1",
-          data: serializePromotionsTo2D(targetPromos),
-        },
-        {
-          op: 'write',
-          range: "'07_거래내역_통합마스터'!A1",
-          data: serializeTransactionsTo2D(targetTransactions, targetUsers, false),
-        },
-        {
-          op: 'write',
-          range: "'08_분할결제_상세행_DB'!A1",
-          data: serializeSplitsTo2D(targetTransactions, false),
-        },
-        {
-          op: 'write',
-          range: "'09_사용자_CM_마스터'!A1",
-          data: serializeUsersTo2D(targetUsers),
-        },
-      ];
-
-      const webhookUrl =
-        localStorage.getItem('kanadara_gsheets_webhook_url') ||
-        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GSHEETS_WEBHOOK_URL ||
-        '';
-
-      if (webhookUrl) {
-        try {
-          await fetch(webhookUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batchOps, spreadsheetId: GOOGLE_MASTER_SPREADSHEET_ID }),
-          });
-        } catch {}
-      }
-
-      try {
-        await fetch('/api/gsheets/push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchOps, webhookUrl }),
-        });
-      } catch {
-        // Offline or static fallback
-      }
+      await pushBatchToSheet(
+        buildMasterBatchOps(targetRates, targetPromos, targetTransactions, targetUsers)
+      );
 
       // 거래내역의 시트 동기화 상태도 최신 마스터 시트 기준으로 갱신
       setTransactions((prev) =>
@@ -2422,6 +2372,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ok: true,
         message: `구글 시트(${GOOGLE_MASTER_SPREADSHEET_ID}) 동기화 완료`,
       };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      pushToast({ type: 'error', title: '구글 시트 저장 실패', description: message });
+      return { ok: false, message };
     } finally {
       setIsSyncingMasterSheet(false);
     }
@@ -2436,104 +2390,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setIsSyncingMasterSheet(true);
-    const now = nowFormatted();
     try {
-      let rateUpdated = 0;
-      let promoUpdated = 0;
-      let usersUpdated = 0;
-
-      let data: { rateTsv?: string; promoTsv?: string; usersTsv?: string } | null = null;
-      try {
-        const res = await fetch('/api/gsheets/pull');
-        if (res.ok) {
-          data = await res.json();
-        }
-      } catch {
-        data = null;
-      }
-
-      // Vercel 배포 환경 또는 오프라인 환경 등에서 /api/gsheets/pull 미지원 시 최신 미러 JSON 자동 fallback
-      if (!data || !data.rateTsv) {
-        try {
-          const mirrorRes = await fetch('/gsheets_live_mirror.json');
-          if (mirrorRes.ok) {
-            const mirrorJson = await mirrorRes.json();
-            const ops = mirrorJson.batchOps || [];
-            const rateOp = ops.find((o: { range?: string }) =>
-              String(o.range || '').includes('05_요율표_마스터')
-            );
-            const promoOp = ops.find((o: { range?: string }) =>
-              String(o.range || '').includes('06_카드사별_프로모션_마스터')
-            );
-            const usersOp = ops.find((o: { range?: string }) =>
-              String(o.range || '').includes('09_사용자_CM_마스터')
-            );
-
-            data = {
-              rateTsv: rateOp?.data
-                ? rateOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
-                : '',
-              promoTsv: promoOp?.data
-                ? promoOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
-                : '',
-              usersTsv: usersOp?.data
-                ? usersOp.data.map((r: unknown[]) => r.map((c) => String(c ?? '')).join('\t')).join('\n')
-                : '',
-            };
-          }
-        } catch {
-          // ignore fallback fetch error
-        }
-      }
-
-      if (data) {
-        if (data.rateTsv) {
-          const parsedRates = parseRateTableFromTsv(data.rateTsv);
-          if (parsedRates.rows.length > 0) {
-            setRateTableRows(parsedRates.rows);
-            rateUpdated = parsedRates.rows.length;
-          }
-        }
-        if (data.promoTsv) {
-          const parsedPromos = parsePromotionsFromTsv(data.promoTsv);
-          if (parsedPromos.promotions.length > 0) {
-            setCardPromotions(parsedPromos.promotions);
-            promoUpdated = parsedPromos.promotions.length;
-          }
-        }
-        if (data.usersTsv) {
-          const parsedUsers = parseUsersFromTsv(data.usersTsv);
-          if (parsedUsers.users.length > 0) {
-            setUsers(parsedUsers.users as User[]);
-            usersUpdated = parsedUsers.users.length;
-          }
-        }
-      }
-
+      const counts = await loadFromSheet();
+      const now = nowFormatted();
       setLastMasterSheetSyncedAt(now);
       localStorage.setItem('kanadara_v5_master_sheet_synced_at', now);
-
       if (!silent) {
         pushToast({
           type: 'success',
-          title: '시트 > 웹앱 조건 및 계정 불러오기(Pull) 완료',
-          description: `05_요율표(${rateUpdated || rateTableRows.length}행) · 06_프로모션(${promoUpdated || cardPromotions.length}건) · 09_사용자_CM(${usersUpdated || users.length}명) 정보가 웹앱에 반영되었습니다.`,
+          title: '시트 > 웹앱 불러오기(Pull) 완료',
+          description: `05_요율표(${counts.rates}행) · 06_프로모션(${counts.promos}건) · 07_거래내역(${counts.txs}건) · 09_사용자(${counts.users}명)을 시트에서 불러왔습니다.`,
         });
       }
-
-      return {
-        ok: true,
-        message: '구글 시트에서 최신 요율표 및 조건을 불러왔습니다.',
-      };
-    } catch {
+      return { ok: true, message: '구글 시트에서 최신 데이터를 불러왔습니다.' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       if (!silent) {
-        pushToast({
-          type: 'info',
-          title: '구글 시트 조건 동기화 확인 완료',
-          description: `현재 요율표 ${rateTableRows.length}행 · 프로모션 ${cardPromotions.length}건이 최신 상태입니다.`,
-        });
+        pushToast({ type: 'error', title: '구글 시트 불러오기 실패', description: message });
       }
-      return { ok: true, message: '동기화 확인 완료' };
+      return { ok: false, message };
     } finally {
       setIsSyncingMasterSheet(false);
     }

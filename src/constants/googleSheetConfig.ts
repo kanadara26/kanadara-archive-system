@@ -366,6 +366,10 @@ export const TRANSACTION_MASTER_SHEET_HEADERS = [
   '비고',
 ];
 
+// 07 탭 마지막 열: 거래 원본 JSON. 시트에서 거래를 손실 없이 복원하는 유일한 근거.
+// ponytail: 셀당 5만자 한도. 거래 history가 그 이상 커지면 별도 탭으로 분리.
+export const TX_RAW_JSON_HEADER = '웹앱원본데이터(JSON)';
+
 export function serializeTransactionsTo2D(
   transactions: Transaction[],
   users: User[],
@@ -375,7 +379,7 @@ export function serializeTransactionsTo2D(
     ? TRANSACTION_MASTER_SHEET_HEADERS.filter(
         (h) => h !== '평균AG수수료율(%)' && h !== 'AG수수료합계(원)'
       )
-    : TRANSACTION_MASTER_SHEET_HEADERS;
+    : [...TRANSACTION_MASTER_SHEET_HEADERS, TX_RAW_JSON_HEADER];
 
   const rows = transactions.map((tx) => {
     const splits = tx.paymentSplits || [];
@@ -488,10 +492,54 @@ export function serializeTransactionsTo2D(
       tx.requestMemo || tx.vehicleInfo || ''
     );
 
+    if (!hideAgColumnsForCm) {
+      baseRow.push(JSON.stringify(tx));
+    }
+
     return baseRow;
   });
 
   return [headers, ...rows];
+}
+
+// 07 탭 → 거래 목록 복원. JSON 열이 없는 거래 행은 복원 불가(legacy)로 집계.
+export function parseTransactionsFrom2D(rows: unknown[][]): {
+  transactions: Transaction[];
+  legacyRowCount: number;
+} {
+  const [header = [], ...body] = rows || [];
+  const jsonCol = header.findIndex((h) => String(h).trim() === TX_RAW_JSON_HEADER);
+  const transactions: Transaction[] = [];
+  let legacyRowCount = 0;
+  for (const r of body) {
+    if (!String(r[0] ?? '').trim()) continue;
+    try {
+      transactions.push(JSON.parse(String(r[jsonCol])) as Transaction);
+    } catch {
+      legacyRowCount++;
+    }
+  }
+  return { transactions, legacyRowCount };
+}
+
+export function rows2DToTsv(rows: unknown[][] | undefined): string {
+  return (rows || []).map((r) => r.map((c) => String(c ?? '')).join('\t')).join('\n');
+}
+
+// 웹앱 상태 → 시트 5개 탭 전체 쓰기 명령
+export function buildMasterBatchOps(
+  rates: RateTableRowItem[],
+  promos: CardPromotionItem[],
+  transactions: Transaction[],
+  users: User[]
+) {
+  return [
+    { op: 'write', range: `'${GOOGLE_SHEET_TABS.RATE_TABLE_MASTER.title}'!A1`, data: serializeRateTableTo2D(rates) },
+    { op: 'write', range: `'${GOOGLE_SHEET_TABS.PROMOTION_MASTER.title}'!A1`, data: serializePromotionsTo2D(promos) },
+    { op: 'write', range: `'${GOOGLE_SHEET_TABS.TRANSACTION_MASTER.title}'!A1`, data: serializeTransactionsTo2D(transactions, users, false) },
+    { op: 'write', range: `'${GOOGLE_SHEET_TABS.SPLIT_PAYMENT_DB.title}'!A1`, data: serializeSplitsTo2D(transactions, false) },
+    { op: 'write', range: `'${GOOGLE_SHEET_TABS.USER_CM_MASTER.title}'!A1`, data: serializeUsersTo2D(users) },
+  ];
 }
 
 export function serializeTransactionsToTsv(

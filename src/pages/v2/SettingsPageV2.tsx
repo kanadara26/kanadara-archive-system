@@ -98,7 +98,7 @@ function doGet(e) {
   var result = {};
   for (var i = 0; i < sheets.length; i++) {
     var s = ss.getSheetByName(sheets[i]);
-    result[sheets[i]] = s ? s.getDataRange().getValues() : [];
+    result[sheets[i]] = s ? s.getDataRange().getDisplayValues() : [];
   }
   return ContentService.createTextOutput(JSON.stringify({ ok: true, data: result }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -126,7 +126,8 @@ function doGet(e) {
         : '웹훅 URL이 삭제되었습니다.',
     });
     if (trimmed) {
-      pushAllMasterTabsToGoogleSheet('실시간 웹훅 연동 테스트');
+      // 쓰기 전에 반드시 시트를 먼저 읽어온다 (읽기 성공 시 자동 저장 활성화)
+      pullRateAndPromotionsFromGoogleSheet();
     }
   };
 

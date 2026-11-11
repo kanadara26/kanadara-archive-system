@@ -32,3 +32,6 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# 시트 데이터(개인정보 포함) 스냅샷은 절대 공개 폴더/저장소에 두지 않음
+public/gsheets_live_mirror.json

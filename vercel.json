@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/((?!api/|logos/|gsheets_live_mirror\\.json).*)",
+      "source": "/((?!api/|logos/).*)",
       "destination": "/index.html"
     }
   ]
