@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
+import { useArrowKeyNavigation } from '../../utils/keyboardNav';
 // 요율표 패널은 열 때만 불러옴 (첫 화면 로딩 가볍게)
 const RateTablePanel = lazy(() => import('../RateTablePanel').then((m) => ({ default: m.RateTablePanel })));
 import {
@@ -18,6 +19,8 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   RefreshCw,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -34,8 +37,12 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     isRateTableSplitOpen,
     setRateTableSplitOpen,
     pushToast,
+    isWideMode,
+    setWideMode,
   } = useApp();
   const navigate = useNavigate();
+  useArrowKeyNavigation();
+  const containerWidth = isWideMode ? 'max-w-none' : 'max-w-6xl';
 
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -104,7 +111,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* 상단 고정 네비게이션 바 (충분한 상하 여백 py-4 sm:py-5 적용) */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+        <div className={`mx-auto flex h-16 ${containerWidth} items-center justify-between gap-3 px-4 sm:px-6`}>
           {/* 좌측: 브랜드 로고 (클릭 시 대시보드 이동) + PC 상단 탭 메뉴 */}
           <div className="flex min-w-0 items-center gap-4 lg:gap-6">
             <button
@@ -163,6 +170,20 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
 
           {/* 우측: 요율표 · 시트 새로고침 · 계정 메뉴 */}
           <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setWideMode(!isWideMode)}
+              aria-pressed={isWideMode}
+              title={isWideMode ? '기본 폭으로 보기' : '화면을 좌우로 넓게 써서 표 형식으로 보기'}
+              className={`hidden h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 text-xs font-bold md:inline-flex ${
+                isWideMode
+                  ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                  : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              {isWideMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              <span className="hidden lg:inline">넓게보기</span>
+            </button>
             <button
               type="button"
               onClick={() => setRateTableSplitOpen(true)}
@@ -395,7 +416,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
       </header>
 
       {/* 메인 콘텐츠 영역 */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12">
+      <main className={`mx-auto w-full ${containerWidth} flex-1 px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12`}>
         {children}
 
         {/* 요율표·프로모션·요율표 이미지 조회 (ADMIN은 등록·수정) */}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import {
@@ -15,6 +15,8 @@ import {
   V2PaymentMethodType,
 } from '../../types';
 import { calcSplitTotals, formatKRW, formatNumber } from '../../utils/format';
+import { DecimalInput } from '../../components/DecimalInput';
+import { CmCombobox } from '../../components/v2/CmCombobox';
 import {
   Check,
   ChevronDown,
@@ -223,6 +225,17 @@ function createDefaultSplit(
   };
 }
 
+const EMPTY_NEW_CM = {
+  name: '',
+  employeeId: '',
+  affiliation: '',
+  phone: '',
+  isBusiness: false,
+  idNumber: '',
+  bankName: '',
+  bankAccount: '',
+};
+
 export const TransactionRegisterPageV2: React.FC = () => {
   const {
     users,
@@ -239,6 +252,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     saveAgTransactionRequest,
     saveUserAccount,
     pushToast,
+    currentUser,
   } = useApp();
   const navigate = useNavigate();
 
@@ -256,8 +270,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
 
   const todayStr = useMemo(() => getTodayDateString(), []);
 
-  // 현재 열려있는 아코디언 단계 (1: 카드사, 2: 결제방법, 3: 결제 및 고객/CM 정보 입력)
-  const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
+  // 현재 열려있는 단계 (1: 카드사·결제방법 선택, 2: 고객/CM 및 결제 정보 입력)
+  const [activeStep, setActiveStep] = useState<1 | 2>(1);
+  const methodGroupRef = useRef<HTMLDivElement>(null);
+  const [isConfirmOpen, setIsConfirmOpen] = useState<boolean>(false);
 
   // 각 단계 입력 상태
   const [selectedCard, setSelectedCard] = useState<SplitCardCompany | null>(null);
@@ -281,12 +297,9 @@ export const TransactionRegisterPageV2: React.FC = () => {
 
   // 간편 CM 즉시 추가 토글
   const [isQuickCmOpen, setIsQuickCmOpen] = useState<boolean>(false);
-  const [quickCmName, setQuickCmName] = useState<string>('');
-  const [quickCmAffiliation, setQuickCmAffiliation] = useState<string>('');
-  const [quickCmPhone, setQuickCmPhone] = useState<string>('');
+  const [newCm, setNewCm] = useState(EMPTY_NEW_CM);
+  const pendingCmLoginIdRef = useRef<string | null>(null); // 방금 등록한 CM을 자동 선택하기 위함
 
-  // 등록 완료 후 안내 배너
-  const [lastRegisteredTxId, setLastRegisteredTxId] = useState<string | null>(null);
 
   // cmUsers 변동 시 기본 선택 보정
   useEffect(() => {
@@ -322,7 +335,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     setCustomerName(target.customerName);
     setSelectedCmId(target.cmId);
     setRequestMemo(target.requestMemo || '');
-    setActiveStep(3);
+    setActiveStep(2);
   }, [editingTxIdV2, transactions, todayStr]);
 
   // 대시보드에서 '불러오기' 항목을 선택한 경우 즉시 로드
@@ -340,7 +353,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
       setCustomerName(found.customerName || '');
       setSelectedCmId(found.cmId || cmUsers[0]?.id || '');
       setRequestMemo(found.requestMemo || '');
-      setActiveStep((Math.min(3, found.activeStep || 1) as 1 | 2 | 3));
+      setActiveStep(found.cardCompany && found.paymentMethodType ? 2 : 1);
     }
     setPendingDraftIdV2(null);
   }, [pendingDraftIdV2, draftsV2, todayStr, cmUsers, setEditingTxIdV2, setPendingDraftIdV2]);
@@ -438,14 +451,14 @@ export const TransactionRegisterPageV2: React.FC = () => {
   // 1단계: 카드사 선택 핸들러
   const handleSelectCard = (card: SplitCardCompany) => {
     setSelectedCard(card);
-    setLastRegisteredTxId(null);
 
     if (selectedMethodType) {
       // 이미 결제방법이 선택되어 있었다면 해당 카드사의 기본 요율로 갱신
       initializeSplitsForCardAndMethod(card, selectedMethodType);
-      setActiveStep(3);
-    } else {
       setActiveStep(2);
+    } else {
+      // 같은 화면 아래 결제방법으로 바로 이동 (Enter로 이어서 선택)
+      setTimeout(() => methodGroupRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus());
     }
   };
 
@@ -540,12 +553,22 @@ export const TransactionRegisterPageV2: React.FC = () => {
 
   // 2단계: 결제방법 선택 핸들러
   const handleSelectMethod = (methodType: V2PaymentMethodType) => {
-    const card = selectedCard || '국민';
-    if (!selectedCard) setSelectedCard(card);
+    if (!selectedCard) {
+      pushToast({ type: 'info', title: '먼저 카드사를 선택해 주세요.' });
+      return;
+    }
     setSelectedMethodType(methodType);
-    initializeSplitsForCardAndMethod(card, methodType);
-    setActiveStep(3);
+    initializeSplitsForCardAndMethod(selectedCard, methodType);
+    setActiveStep(2);
   };
+
+  // 2단계가 열리면 첫 입력칸(고객명, 이미 있으면 CM)으로 포커스
+  useEffect(() => {
+    if (activeStep !== 2) return;
+    const target = document.getElementById(customerName.trim() ? 'v2-cm-select' : 'v2-customer-name');
+    if (target && !(target as HTMLInputElement).disabled) target.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep]);
 
   // 3단계: 결제 행 값 변경 헬퍼
   const updateSplit = (index: number, patch: Partial<PaymentSplitItem>) => {
@@ -795,7 +818,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     setCustomerName(draft.customerName || '');
     setSelectedCmId(draft.cmId || cmUsers[0]?.id || '');
     setRequestMemo(draft.requestMemo || '');
-    setActiveStep((Math.min(3, draft.activeStep || 1) as 1 | 2 | 3));
+    setActiveStep(draft.cardCompany && draft.paymentMethodType ? 2 : 1);
     setIsDraftDrawerOpen(false);
     pushToast({
       type: 'info',
@@ -804,86 +827,102 @@ export const TransactionRegisterPageV2: React.FC = () => {
     });
   };
 
-  // 간편 CM 등록
+  // 새 CM 등록 (이름·소속·사번 필수) → 저장되면 담당 CM으로 자동 선택
   const handleQuickAddCm = () => {
-    if (!quickCmName.trim()) {
-      pushToast({ type: 'error', title: 'CM 이름을 입력해 주세요.' });
+    const missing = [
+      !newCm.name.trim() && '이름',
+      !newCm.affiliation.trim() && '소속',
+      !newCm.employeeId.trim() && '사번',
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      pushToast({ type: 'error', title: `CM ${missing.join(', ')}을(를) 입력해 주세요.` });
       return;
     }
+    const loginId = `cm.${Date.now()}@autodealer.kr`;
     const res = saveUserAccount({
-      loginId: `cm.${Date.now()}@autodealer.kr`,
-      name: quickCmName.trim(),
+      loginId,
+      name: newCm.name.trim(),
       role: 'CM',
-      affiliation: quickCmAffiliation.trim(),
-      phone: quickCmPhone.trim(),
+      affiliation: newCm.affiliation.trim(),
+      phone: newCm.phone.trim(),
+      employeeId: newCm.employeeId.trim(),
+      isBusiness: newCm.isBusiness,
+      businessNumber: newCm.isBusiness ? newCm.idNumber : '',
+      rrn: newCm.isBusiness ? '' : newCm.idNumber,
+      bankName: newCm.bankName,
+      bankAccount: newCm.bankAccount,
       isActive: true,
     });
     if (res.ok) {
-      setQuickCmName('');
-      setQuickCmAffiliation('');
-      setQuickCmPhone('');
+      pendingCmLoginIdRef.current = loginId;
+      setNewCm(EMPTY_NEW_CM);
       setIsQuickCmOpen(false);
     }
   };
 
-  // 최종 거래 승인건 등록 제출
+  useEffect(() => {
+    if (!pendingCmLoginIdRef.current) return;
+    const created = cmUsers.find((u) => u.loginId === pendingCmLoginIdRef.current);
+    if (created) {
+      setSelectedCmId(created.id);
+      pendingCmLoginIdRef.current = null;
+    }
+  }, [cmUsers]);
+
+  const existingTx = editingTxIdV2 ? transactions.find((t) => t.id === editingTxIdV2) : undefined;
+  const isAdmin = currentUser?.role === 'ADMIN';
+  // AG는 이미 등록된 거래의 고객/CM 정보를 바꿀 수 없음
+  const isCustomerLocked = !!existingTx && currentUser?.role === 'AG';
+  // 승인일자는 관리자만, 카드 승인된 거래를 수정할 때 바꿀 수 있음
+  const canEditApprovalDate = isAdmin && !!existingTx?.approvalDate;
+
+  // 1) 입력 검증 → 최종 확인 팝업
   const handleSubmitTransaction = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCard) {
+    if (!selectedCard || !selectedMethodType || paymentSplits.length === 0) {
       setActiveStep(1);
-      pushToast({ type: 'error', title: '1단계에서 카드사를 선택해 주세요.' });
-      return;
-    }
-    if (!selectedMethodType || paymentSplits.length === 0) {
-      setActiveStep(2);
-      pushToast({ type: 'error', title: '2단계에서 결제 방법을 선택해 주세요.' });
+      pushToast({ type: 'error', title: '카드사와 결제 방법을 선택해 주세요.' });
       return;
     }
     if (paymentSplits.some((s) => !s.amount || s.amount <= 0)) {
-      setActiveStep(3);
       pushToast({ type: 'error', title: '결제 금액을 0원보다 크게 입력해 주세요.' });
       return;
     }
     if (!customerName.trim()) {
-      setActiveStep(3);
       pushToast({ type: 'error', title: '고객명을 입력해 주세요.' });
+      document.getElementById('v2-customer-name')?.focus();
       return;
     }
     if (!selectedCmId) {
-      setActiveStep(3);
       pushToast({ type: 'error', title: '담당 CM을 선택해 주세요.' });
+      document.getElementById('v2-cm-select')?.focus();
       return;
     }
+    setIsConfirmOpen(true);
+  };
 
-    const existingTx = editingTxIdV2
-      ? transactions.find((t) => t.id === editingTxIdV2)
-      : undefined;
-
+  // 2) 팝업에서 확인 → 저장 → 대시보드로 이동 (완료 알림은 화면 위 토스트)
+  const handleConfirmSave = () => {
+    if (!selectedCard) return;
     const res = saveAgTransactionRequest({
       txId: editingTxIdV2 || undefined,
       customerName: customerName.trim(),
       requestDate,
-      approvalDate: existingTx ? existingTx.approvalDate : '',
+      approvalDate: existingTx ? (canEditApprovalDate ? approvalDate : existingTx.approvalDate) : '',
       status: existingTx ? existingTx.status : 'WAITING',
       settlementStatus: existingTx ? existingTx.settlementStatus : '정산 대기',
       cmId: selectedCmId,
-      paymentSplits: paymentSplits.map((s) => ({
-        ...s,
-        cardCompany: selectedCard,
-      })),
+      paymentSplits: paymentSplits.map((s) => ({ ...s, cardCompany: selectedCard })),
       requestMemo: requestMemo.trim() || undefined,
     });
-
-    if (res.ok) {
-      if (currentDraftId) {
-        deleteDraftV2(currentDraftId);
-      }
-      const savedId = res.transactionId || editingTxIdV2 || '신규';
-      handleResetForm();
-      setLastRegisteredTxId(savedId);
-    } else {
-      pushToast({ type: 'error', title: '등록 실패', description: res.message });
+    setIsConfirmOpen(false);
+    if (!res.ok) {
+      pushToast({ type: 'error', title: '저장 실패', description: res.message });
+      return;
     }
+    if (currentDraftId) deleteDraftV2(currentDraftId);
+    handleResetForm();
+    navigate('/v2/dashboard');
   };
 
   const selectedCmObj = cmUsers.find((c) => c.id === selectedCmId);
@@ -904,7 +943,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
             )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            단계별로 선택하면 다음 입력 단계가 자동으로 열립니다.
+            카드사와 결제 방법을 고르면 입력 화면이 열립니다. 방향키로 칸 이동, Enter로 선택·다음 칸.
           </p>
         </div>
 
@@ -1005,52 +1044,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
         </div>
       )}
 
-      {/* 등록 완료 알림 배너 */}
-      {lastRegisteredTxId && (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-slate-900 bg-slate-900 px-4 py-3.5 text-white">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-slate-950">
-              <Check className="h-4 w-4 stroke-[3]" />
-            </div>
-            <div>
-              <p className="text-sm font-bold">
-                거래 승인건({lastRegisteredTxId})이 정상 등록되었습니다.
-              </p>
-              <p className="text-xs text-slate-300">
-                이어서 새 거래를 등록하거나 월별 수수료 정산 페이지에서 내역을 확인할 수 있습니다.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigate('/v2/dashboard')}
-              className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-slate-900 hover:bg-slate-100"
-            >
-              대시보드 확인
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/v2/settlements')}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700"
-            >
-              월별 정산 보기
-            </button>
-            <button
-              type="button"
-              onClick={() => setLastRegisteredTxId(null)}
-              className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800"
-            >
-              닫기
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* 단계별 아코디언 폼 */}
       <form onSubmit={handleSubmitTransaction} className="space-y-3">
         {/* ================================================================= */}
-        {/* STEP 1. 카드사 선택 */}
+        {/* STEP 1. 카드사 · 결제 방법 선택 (한 화면) */}
         {/* ================================================================= */}
         <section className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
           <button
@@ -1065,31 +1062,38 @@ export const TransactionRegisterPageV2: React.FC = () => {
                 className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${
                   activeStep === 1
                     ? 'bg-white text-slate-900'
-                    : selectedCard
+                    : selectedCard && selectedMethodType
                     ? 'bg-slate-900 text-white'
                     : 'bg-slate-100 text-slate-500'
                 }`}
               >
-                {selectedCard && activeStep !== 1 ? <Check className="h-3.5 w-3.5" /> : '1'}
+                {selectedCard && selectedMethodType && activeStep !== 1 ? <Check className="h-3.5 w-3.5" /> : '1'}
               </span>
-              <span className="text-sm font-bold">카드사 선택</span>
+              <span className="text-sm font-bold">카드사 · 결제 방법 선택</span>
             </div>
 
             <div className="flex items-center gap-2">
               {selectedCard && (
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-bold ${
-                    activeStep === 1
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-slate-100 text-slate-900'
+                    activeStep === 1 ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'
                   }`}
                 >
                   <img
                     src={V2_CARD_LOGO_URLS[selectedCard]}
-                    alt={V2_CARD_DISPLAY_NAMES[selectedCard]}
+                    alt=""
                     className="h-4 w-4 rounded-sm bg-white p-0.5 object-contain"
                   />
                   {V2_CARD_DISPLAY_NAMES[selectedCard]}
+                </span>
+              )}
+              {selectedMethodType && (
+                <span
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold ${
+                    activeStep === 1 ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'
+                  }`}
+                >
+                  {selectedMethodType}
                 </span>
               )}
               {activeStep === 1 ? (
@@ -1103,11 +1107,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
           </button>
 
           {activeStep === 1 && (
-            <div className="p-4 sm:p-5 border-t border-slate-100">
-              <p className="text-xs text-slate-500 mb-3.5">
-                결제 진행할 카드사를 선택하세요. 선택 즉시 다음 단계로 이동합니다.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+            <div className="space-y-6 border-t border-slate-100 p-4 sm:p-5">
+              <div>
+                <p className="mb-3 text-xs font-extrabold text-slate-800">카드사</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
                 {SPLIT_CARD_COMPANIES.map((cardKey) => {
                   const colorMeta = CARD_COMPANY_COLORS[cardKey];
                   const displayName = V2_CARD_DISPLAY_NAMES[cardKey];
@@ -1211,75 +1214,14 @@ export const TransactionRegisterPageV2: React.FC = () => {
                   );
                 })}
               </div>
-            </div>
-          )}
-        </section>
+              </div>
 
-        {/* ================================================================= */}
-        {/* STEP 2. 결제 방법 선택 */}
-        {/* ================================================================= */}
-        <section className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
-          <button
-            type="button"
-            onClick={() => {
-              if (!selectedCard) {
-                setActiveStep(1);
-                pushToast({ type: 'info', title: '먼저 카드사를 선택해 주세요.' });
-                return;
-              }
-              setActiveStep(2);
-            }}
-            className={`flex w-full items-center justify-between px-4 py-3.5 text-left transition-colors ${
-              activeStep === 2 ? 'bg-slate-900 text-white' : 'bg-white hover:bg-slate-50'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <span
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${
-                  activeStep === 2
-                    ? 'bg-white text-slate-900'
-                    : selectedMethodType
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-500'
-                }`}
-              >
-                {selectedMethodType && activeStep !== 2 ? (
-                  <Check className="h-3.5 w-3.5" />
-                ) : (
-                  '2'
-                )}
-              </span>
-              <span className="text-sm font-bold">결제 방법 선택</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {selectedMethodType && (
-                <span
-                  className={`rounded-md px-2.5 py-1 text-xs font-bold ${
-                    activeStep === 2
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-slate-100 text-slate-900'
-                  }`}
-                >
-                  {selectedMethodType}
-                </span>
-              )}
-              {activeStep === 2 ? (
-                <ChevronDown className="h-4 w-4 opacity-70" />
-              ) : (
-                <span className="text-xs font-semibold text-slate-400 flex items-center gap-0.5">
-                  변경 <ChevronRight className="h-3.5 w-3.5" />
-                </span>
-              )}
-            </div>
-          </button>
-
-          {activeStep === 2 && (
-            <div className="p-4 sm:p-5 border-t border-slate-100">
-              <p className="text-xs text-slate-500 mb-3">
-                4가지 결제 방법 중 하나를 선택하세요.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div ref={methodGroupRef}>
+                <p className="mb-3 text-xs font-extrabold text-slate-800">
+                  결제 방법
+                  {!selectedCard && <span className="ml-1.5 font-medium text-slate-400">카드사를 먼저 선택하세요</span>}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {V2_PAYMENT_METHODS.map((m) => {
                   const isSelected = selectedMethodType === m.key;
                   const count = cardMethodCounts[m.key] || 0;
@@ -1288,8 +1230,9 @@ export const TransactionRegisterPageV2: React.FC = () => {
                     <button
                       key={m.key}
                       type="button"
+                      disabled={!selectedCard}
                       onClick={() => handleSelectMethod(m.key)}
-                      className={`flex flex-col justify-between rounded-xl border p-4 text-left transition-all min-h-[88px] ${
+                      className={`flex flex-col justify-between rounded-xl border p-4 text-left transition-all min-h-[88px] disabled:cursor-not-allowed disabled:opacity-40 ${
                         !hasRates
                           ? isSelected
                             ? 'border-slate-500 bg-slate-700 text-slate-100 shadow-sm'
@@ -1337,67 +1280,64 @@ export const TransactionRegisterPageV2: React.FC = () => {
                   );
                 })}
               </div>
+              </div>
             </div>
           )}
         </section>
 
         {/* ================================================================= */}
-        {/* STEP 3. 결제 정보 입력 + 우측 간소화된 요율표 */}
+        {/* STEP 2. 고객·CM 및 결제 정보 입력 + 우측 요율표 */}
         {/* ================================================================= */}
         <section className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
           <button
             type="button"
             onClick={() => {
-              if (!selectedCard) {
+              if (!selectedCard || !selectedMethodType) {
                 setActiveStep(1);
                 return;
               }
-              if (!selectedMethodType) {
-                setActiveStep(2);
-                return;
-              }
-              setActiveStep(3);
+              setActiveStep(2);
             }}
             className={`flex w-full items-center justify-between px-4 py-3.5 text-left transition-colors ${
-              activeStep === 3 ? 'bg-slate-900 text-white' : 'bg-white hover:bg-slate-50'
+              activeStep === 2 ? 'bg-slate-900 text-white' : 'bg-white hover:bg-slate-50'
             }`}
           >
             <div className="flex items-center gap-2.5">
               <span
                 className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${
-                  activeStep === 3
+                  activeStep === 2
                     ? 'bg-white text-slate-900'
                     : totals.totalAmount > 0 && customerName.trim()
                     ? 'bg-slate-900 text-white'
                     : 'bg-slate-100 text-slate-500'
                 }`}
               >
-                {totals.totalAmount > 0 && customerName.trim() && activeStep !== 3 ? (
+                {totals.totalAmount > 0 && customerName.trim() && activeStep !== 2 ? (
                   <Check className="h-3.5 w-3.5" />
                 ) : (
-                  '3'
+                  '2'
                 )}
               </span>
-              <span className="text-sm font-bold">결제 정보 입력</span>
+              <span className="text-sm font-bold">고객 · CM 및 결제 정보 입력</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               {totals.totalAmount > 0 && (
                 <span
                   className={`rounded-md px-2.5 py-1 text-xs font-bold tabular-nums ${
-                    activeStep === 3
+                    activeStep === 2
                       ? 'bg-slate-800 text-white'
                       : 'bg-slate-100 text-slate-900'
                   }`}
                 >
-                  총 {formatKRW(totals.totalAmount)} · AG {formatKRW(totals.totalAgCommission)} / CM{' '}
-                  {formatKRW(totals.totalCmCommission)}
+                  총 {formatKRW(totals.totalAmount)} · CM {formatKRW(totals.totalCmCommission)} / AG{' '}
+                  {formatKRW(totals.totalAgCommission)}
                 </span>
               )}
               {(customerName.trim() || selectedCmObj) && (
                 <span
                   className={`rounded-md px-2.5 py-1 text-xs font-bold ${
-                    activeStep === 3
+                    activeStep === 2
                       ? 'bg-slate-800 text-white'
                       : 'bg-slate-100 text-slate-900'
                   }`}
@@ -1406,7 +1346,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
                   {selectedCmObj ? `CM: ${selectedCmObj.name}` : 'CM 미선택'}
                 </span>
               )}
-              {activeStep === 3 ? (
+              {activeStep === 2 ? (
                 <ChevronDown className="h-4 w-4 opacity-70" />
               ) : (
                 <span className="text-xs font-semibold text-slate-400 flex items-center gap-0.5">
@@ -1416,8 +1356,225 @@ export const TransactionRegisterPageV2: React.FC = () => {
             </div>
           </button>
 
-          {activeStep === 3 && selectedCard && selectedMethodType && (
+          {activeStep === 2 && selectedCard && selectedMethodType && (
             <div className="p-4 sm:p-5 border-t border-slate-100 space-y-5">
+              {/* 고객 / 담당 CM (먼저 입력) */}
+              <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-slate-900">고객 / 담당 CM</span>
+                  {isCustomerLocked && (
+                    <span className="text-[11px] font-semibold text-slate-500">등록된 거래의 고객·CM 정보는 AG가 바꿀 수 없습니다</span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* 고객명 입력 */}
+                  <div>
+                    <label
+                      htmlFor="v2-customer-name"
+                      className="block text-xs font-extrabold text-slate-800 mb-1.5"
+                    >
+                      고객명 <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      id="v2-customer-name"
+                      type="text"
+                      required
+                      lang="ko"
+                      disabled={isCustomerLocked}
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="고객 성명 입력 (예: 홍길동)"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+                  </div>
+
+                  {/* 담당 CM 선택 */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label
+                        htmlFor="v2-cm-select"
+                        className="text-xs font-extrabold text-slate-800 flex items-center gap-1"
+                      >
+                        <UserCheck className="h-3.5 w-3.5 text-slate-600" />
+                        담당 CM <span className="text-rose-500">*</span>
+                      </label>
+                      {!isCustomerLocked && (
+                      <button
+                        type="button"
+                        data-nav-skip
+                        onClick={() => setIsQuickCmOpen((prev) => !prev)}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900 underline"
+                      >
+                        <UserPlus className="h-3 w-3" />
+                        {isQuickCmOpen ? '새 CM 등록 닫기' : '+ 새 CM 등록'}
+                      </button>
+                      )}
+                    </div>
+
+                    <CmCombobox
+                      id="v2-cm-select"
+                      cms={cmUsers}
+                      value={selectedCmId}
+                      onChange={setSelectedCmId}
+                      disabled={isCustomerLocked}
+                    />
+                  </div>
+                </div>
+
+                {/* 새 CM 등록 폼 (설정의 CM 등록과 같은 항목) */}
+                {isQuickCmOpen && (
+                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5">
+                    <p className="text-xs font-bold text-slate-800">
+                      새 CM을 저장하면 목록에 추가되고 담당 CM으로 바로 선택됩니다.
+                    </p>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                      <div>
+                        <label htmlFor="new-cm-name" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          CM 이름 <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          id="new-cm-name"
+                          type="text"
+                          lang="ko"
+                          value={newCm.name}
+                          onChange={(e) => setNewCm((c) => ({ ...c, name: e.target.value }))}
+                          placeholder="예: 김민준"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-employeeId" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          사번 <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          id="new-cm-employeeId"
+                          type="text"
+                          lang="ko"
+                          value={newCm.employeeId}
+                          onChange={(e) => setNewCm((c) => ({ ...c, employeeId: e.target.value }))}
+                          placeholder="예: CM-0012"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-affiliation" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          소속 / 대리점 <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          id="new-cm-affiliation"
+                          type="text"
+                          lang="ko"
+                          value={newCm.affiliation}
+                          onChange={(e) => setNewCm((c) => ({ ...c, affiliation: e.target.value }))}
+                          placeholder="예: 현대자동차 서초지점"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-phone" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          연락처
+                        </label>
+                        <input
+                          id="new-cm-phone"
+                          type="text"
+                          inputMode="numeric"
+                          value={newCm.phone}
+                          onChange={(e) => setNewCm((c) => ({ ...c, phone: e.target.value }))}
+                          placeholder="예: 010-1234-5678"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-[11px] font-bold text-slate-700">사업자 여부</span>
+                        <div role="radiogroup" aria-label="사업자 여부" className="grid grid-cols-2 rounded-lg border border-slate-300 bg-white p-0.5">
+                          {[
+                            { value: true, label: '사업자' },
+                            { value: false, label: '개인 (비사업자)' },
+                          ].map((opt) => (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              role="radio"
+                              aria-checked={newCm.isBusiness === opt.value}
+                              onClick={() => setNewCm((c) => ({ ...c, isBusiness: opt.value }))}
+                              className={`rounded-md px-2 py-1.5 text-xs font-bold transition-colors ${
+                                newCm.isBusiness === opt.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-idNumber" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          {newCm.isBusiness ? '사업자등록번호' : '주민등록번호'}
+                        </label>
+                        <input
+                          id="new-cm-idNumber"
+                          type="text"
+                          inputMode="numeric"
+                          value={newCm.idNumber}
+                          onChange={(e) => setNewCm((c) => ({ ...c, idNumber: e.target.value }))}
+                          placeholder={newCm.isBusiness ? '000-00-00000' : '000000-0000000'}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-bankName" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          계좌 은행
+                        </label>
+                        <input
+                          id="new-cm-bankName"
+                          type="text"
+                          lang="ko"
+                          value={newCm.bankName}
+                          onChange={(e) => setNewCm((c) => ({ ...c, bankName: e.target.value }))}
+                          placeholder="예: 국민은행"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-cm-bankAccount" className="mb-1 block text-[11px] font-bold text-slate-700">
+                          계좌번호
+                        </label>
+                        <input
+                          id="new-cm-bankAccount"
+                          type="text"
+                          inputMode="numeric"
+                          value={newCm.bankAccount}
+                          onChange={(e) => setNewCm((c) => ({ ...c, bankAccount: e.target.value }))}
+                          placeholder="예: 123-456-789012"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewCm(EMPTY_NEW_CM);
+                          setIsQuickCmOpen(false);
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleQuickAddCm}
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        CM 저장
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
                 {/* 좌측: 결제 정보 입력 영역 (7컬럼) */}
                 <div className="lg:col-span-7 space-y-4">
@@ -1444,17 +1601,27 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         htmlFor="v2-approval-date"
                         className="block text-[11px] font-semibold text-slate-500 mb-1"
                       >
-                        승인일자 (승인 시 기록)
+                        {canEditApprovalDate ? '승인일자 (관리자 수정)' : '승인일자 (승인 시 기록)'}
                       </label>
-                      <input
-                        id="v2-approval-date"
-                        type="text"
-                        value={approvalDate}
-                        placeholder="카드 승인 시 자동 기록"
-                        disabled
-                        readOnly
-                        className="w-full rounded-lg border border-slate-200 bg-slate-200/70 px-2.5 py-1.5 text-xs font-bold text-slate-500 placeholder:text-slate-400 cursor-not-allowed"
-                      />
+                      {canEditApprovalDate ? (
+                        <input
+                          id="v2-approval-date"
+                          type="date"
+                          value={approvalDate}
+                          onChange={(e) => setApprovalDate(e.target.value)}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900"
+                        />
+                      ) : (
+                        <input
+                          id="v2-approval-date"
+                          type="text"
+                          value={approvalDate}
+                          placeholder="카드 승인 시 자동 기록"
+                          disabled
+                          readOnly
+                          className="w-full rounded-lg border border-slate-200 bg-slate-200/70 px-2.5 py-1.5 text-xs font-bold text-slate-500 placeholder:text-slate-400 cursor-not-allowed"
+                        />
+                      )}
                     </div>
                     <div>
                       <span className="block text-[11px] font-semibold text-slate-500 mb-1">
@@ -1659,8 +1826,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                   {isLumpSum
                                     ? `캐시백 ${matchedRateRow.cashbackRate}%`
                                     : `금리 ${matchedRateRow.interestRate}%`}{' '}
-                                  · AG {matchedRateRow.agCommissionRate}% · CM{' '}
-                                  {matchedRateRow.cmCommissionRate}%
+                                  · CM {matchedRateRow.cmCommissionRate}% · AG{' '}
+                                  {matchedRateRow.agCommissionRate}%
                                 </span>
                               </div>
                             )}
@@ -1678,18 +1845,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                 </label>
                                 <div className="flex items-center gap-3">
                                   <div className="flex items-center gap-1.5">
-                                    <input
+                                    <DecimalInput
                                       id={`v2-cb-${split.id}`}
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      max="10"
                                       value={split.cashbackRate}
-                                      onChange={(e) =>
-                                        updateSplit(idx, {
-                                          cashbackRate: parseFloat(e.target.value) || 0,
-                                        })
-                                      }
+                                      onChange={(n) => updateSplit(idx, { cashbackRate: n })}
                                       className="w-24 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-right text-sm font-extrabold text-slate-900 tabular-nums"
                                     />
                                     <span className="text-xs font-bold text-slate-600">%</span>
@@ -1735,18 +1894,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                   할부 금리 (%)
                                 </label>
                                 <div className="flex items-center gap-1.5">
-                                  <input
+                                  <DecimalInput
                                     id={`v2-interest-${split.id}`}
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    max="20"
                                     value={split.interestRate}
-                                    onChange={(e) =>
-                                      updateSplit(idx, {
-                                        interestRate: parseFloat(e.target.value) || 0,
-                                      })
-                                    }
+                                    onChange={(n) => updateSplit(idx, { interestRate: n })}
                                     className="w-28 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-right text-sm font-extrabold text-slate-900 tabular-nums"
                                   />
                                   <span className="text-xs font-bold text-slate-600">%</span>
@@ -1755,8 +1906,47 @@ export const TransactionRegisterPageV2: React.FC = () => {
                             </div>
                           )}
 
-                          {/* 3. AG 수수료율·예상금액 & CM 수수료율·예상금액 (직접 수정 가능) */}
+                          {/* 3. CM · AG 수수료율과 예상금액 (직접 수정 가능) */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* CM 수수료 */}
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-slate-900">
+                                  CM 수수료
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <DecimalInput
+                                    aria-label="CM 수수료율(%)"
+                                    value={split.cmCommissionRate}
+                                    onChange={(n) => updateSplit(idx, { cmCommissionRate: n })}
+                                    className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900 tabular-nums"
+                                  />
+                                  <span className="text-xs font-bold text-slate-600">%</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between pt-1 border-t border-slate-200/80">
+                                <span className="text-[11px] font-medium text-slate-500">
+                                  예상 금액 (직접수정 가능)
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    aria-label="CM 예상 수수료 금액"
+                                    value={formatNumber(cmExpectedAmt)}
+                                    onChange={(e) =>
+                                      handleDirectCommissionAmountChange(
+                                        idx,
+                                        'CM',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="w-28 rounded-md border border-slate-200 bg-white px-2 py-1 text-right text-sm font-black text-slate-900 tabular-nums"
+                                  />
+                                  <span className="text-xs font-bold text-slate-700">원</span>
+                                </div>
+                              </div>
+                            </div>
                             {/* AG 수수료 */}
                             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
                               <div className="flex items-center justify-between">
@@ -1764,18 +1954,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                   AG 수수료
                                 </span>
                                 <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    max="15"
+                                  <DecimalInput
                                     aria-label="AG 수수료율(%)"
                                     value={split.agCommissionRate}
-                                    onChange={(e) =>
-                                      updateSplit(idx, {
-                                        agCommissionRate: parseFloat(e.target.value) || 0,
-                                      })
-                                    }
+                                    onChange={(n) => updateSplit(idx, { agCommissionRate: n })}
                                     className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900 tabular-nums"
                                   />
                                   <span className="text-xs font-bold text-slate-600">%</span>
@@ -1805,53 +1987,6 @@ export const TransactionRegisterPageV2: React.FC = () => {
                               </div>
                             </div>
 
-                            {/* CM 수수료 */}
-                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-extrabold text-slate-900">
-                                  CM 수수료
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    max="15"
-                                    aria-label="CM 수수료율(%)"
-                                    value={split.cmCommissionRate}
-                                    onChange={(e) =>
-                                      updateSplit(idx, {
-                                        cmCommissionRate: parseFloat(e.target.value) || 0,
-                                      })
-                                    }
-                                    className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900 tabular-nums"
-                                  />
-                                  <span className="text-xs font-bold text-slate-600">%</span>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between pt-1 border-t border-slate-200/80">
-                                <span className="text-[11px] font-medium text-slate-500">
-                                  예상 금액 (직접수정 가능)
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    aria-label="CM 예상 수수료 금액"
-                                    value={formatNumber(cmExpectedAmt)}
-                                    onChange={(e) =>
-                                      handleDirectCommissionAmountChange(
-                                        idx,
-                                        'CM',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-28 rounded-md border border-slate-200 bg-white px-2 py-1 text-right text-sm font-black text-slate-900 tabular-nums"
-                                  />
-                                  <span className="text-xs font-bold text-slate-700">원</span>
-                                </div>
-                              </div>
-                            </div>
                           </div>
                         </div>
                       );
@@ -1870,18 +2005,18 @@ export const TransactionRegisterPageV2: React.FC = () => {
                       <div className="flex items-center gap-5">
                         <div>
                           <span className="text-[11px] text-slate-400 block">
-                            총 예상 AG 수수료 ({totals.effectiveAgRate}%)
-                          </span>
-                          <span className="text-sm font-extrabold tabular-nums">
-                            {formatKRW(totals.totalAgCommission)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-slate-400 block">
                             총 예상 CM 수수료 ({totals.effectiveCmRate}%)
                           </span>
                           <span className="text-sm font-extrabold tabular-nums">
                             {formatKRW(totals.totalCmCommission)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[11px] text-slate-400 block">
+                            총 예상 AG 수수료 ({totals.effectiveAgRate}%)
+                          </span>
+                          <span className="text-sm font-extrabold tabular-nums">
+                            {formatKRW(totals.totalAgCommission)}
                           </span>
                         </div>
                       </div>
@@ -2022,27 +2157,6 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                     isSelectedRow ? 'text-slate-400' : 'text-slate-500'
                                   }`}
                                 >
-                                  AG 수수료율
-                                </span>
-                                <span className="font-extrabold tabular-nums">
-                                  {row.agCommissionRate}%
-                                </span>
-                                {refAmt > 0 && (
-                                  <span
-                                    className={`block text-[10px] tabular-nums ${
-                                      isSelectedRow ? 'text-slate-300' : 'text-slate-500'
-                                    }`}
-                                  >
-                                    {formatKRW(estAg)}
-                                  </span>
-                                )}
-                              </div>
-                              <div>
-                                <span
-                                  className={`block text-[10px] ${
-                                    isSelectedRow ? 'text-slate-400' : 'text-slate-500'
-                                  }`}
-                                >
                                   CM 수수료율
                                 </span>
                                 <span className="font-extrabold tabular-nums">
@@ -2055,6 +2169,27 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                     }`}
                                   >
                                     {formatKRW(estCm)}
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <span
+                                  className={`block text-[10px] ${
+                                    isSelectedRow ? 'text-slate-400' : 'text-slate-500'
+                                  }`}
+                                >
+                                  AG 수수료율
+                                </span>
+                                <span className="font-extrabold tabular-nums">
+                                  {row.agCommissionRate}%
+                                </span>
+                                {refAmt > 0 && (
+                                  <span
+                                    className={`block text-[10px] tabular-nums ${
+                                      isSelectedRow ? 'text-slate-300' : 'text-slate-500'
+                                    }`}
+                                  >
+                                    {formatKRW(estAg)}
                                   </span>
                                 )}
                               </div>
@@ -2077,134 +2212,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
                 </div>
               </div>
 
-              {/* ============================================================= */}
-              {/* 고객 / CM 정보 및 비고 입력 (결제 정보 입력에 통합) */}
-              {/* ============================================================= */}
+              {/* 비고 및 최종 저장 */}
               <div className="pt-5 border-t border-slate-200 space-y-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-900">
-                    고객 / CM 정보 및 비고 입력
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    대시보드 카드에도 비고 내용이 함께 표시됩니다.
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* 고객명 입력 */}
-                  <div>
-                    <label
-                      htmlFor="v2-customer-name"
-                      className="block text-xs font-extrabold text-slate-800 mb-1.5"
-                    >
-                      고객명 <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      id="v2-customer-name"
-                      type="text"
-                      required
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="고객 성명 입력 (예: 홍길동)"
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
-                    />
-                  </div>
-
-                  {/* 담당 CM 선택 */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label
-                        htmlFor="v2-cm-select"
-                        className="text-xs font-extrabold text-slate-800 flex items-center gap-1"
-                      >
-                        <UserCheck className="h-3.5 w-3.5 text-slate-600" />
-                        담당 CM 선택 (설정 등록 CM) <span className="text-rose-500">*</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsQuickCmOpen((prev) => !prev)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900 underline"
-                      >
-                        <UserPlus className="h-3 w-3" />
-                        {isQuickCmOpen ? '직접 추가 닫기' : '+ 새 CM 간편 등록'}
-                      </button>
-                    </div>
-
-                    <select
-                      id="v2-cm-select"
-                      value={selectedCmId}
-                      onChange={(e) => setSelectedCmId(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
-                    >
-                      {cmUsers.map((cm) => (
-                        <option key={cm.id} value={cm.id}>
-                          {cm.name} ({cm.affiliation} · {cm.phone})
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* 빠른 선택 칩 */}
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {cmUsers.map((cm) => (
-                        <button
-                          key={cm.id}
-                          type="button"
-                          onClick={() => setSelectedCmId(cm.id)}
-                          className={`rounded-lg px-2.5 py-1 text-xs font-bold border transition-colors ${
-                            selectedCmId === cm.id
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {cm.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 즉석 CM 추가 인라인 폼 */}
-                {isQuickCmOpen && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-3">
-                    <p className="text-xs font-bold text-slate-800">
-                      새 CM 정보를 저장하면 목록에 즉시 추가됩니다.
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      <input
-                        type="text"
-                        value={quickCmName}
-                        onChange={(e) => setQuickCmName(e.target.value)}
-                        placeholder="CM 이름 (필수)"
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold"
-                      />
-                      <input
-                        type="text"
-                        value={quickCmAffiliation}
-                        onChange={(e) => setQuickCmAffiliation(e.target.value)}
-                        placeholder="소속/대리점 (예: 현대 서초지점)"
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
-                      />
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={quickCmPhone}
-                          onChange={(e) => setQuickCmPhone(e.target.value)}
-                          placeholder="연락처 (선택)"
-                          className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleQuickAddCm}
-                          className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 shrink-0"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          저장
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* 비고 (선택) */}
                 <div>
                   <label
@@ -2216,6 +2225,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
                   <input
                     id="v2-memo"
                     type="text"
+                    lang="ko"
                     value={requestMemo}
                     onChange={(e) => setRequestMemo(e.target.value)}
                     placeholder="특이사항이나 차량 정보 등 비고 사항을 입력해 주세요 (선택)"
@@ -2231,13 +2241,13 @@ export const TransactionRegisterPageV2: React.FC = () => {
                       {selectedMethodType || '-'} · 총 {formatKRW(totals.totalAmount)}
                     </div>
                     <div className="text-slate-600 tabular-nums">
-                      예상 AG 수수료:{' '}
-                      <strong className="text-slate-900">
-                        {formatKRW(totals.totalAgCommission)} ({totals.effectiveAgRate}%)
-                      </strong>{' '}
-                      · 예상 CM 수수료:{' '}
+                      예상 CM 수수료:{' '}
                       <strong className="text-slate-900">
                         {formatKRW(totals.totalCmCommission)} ({totals.effectiveCmRate}%)
+                      </strong>{' '}
+                      · 예상 AG 수수료:{' '}
+                      <strong className="text-slate-900">
+                        {formatKRW(totals.totalAgCommission)} ({totals.effectiveAgRate}%)
                       </strong>
                     </div>
                   </div>
@@ -2265,6 +2275,105 @@ export const TransactionRegisterPageV2: React.FC = () => {
           )}
         </section>
       </form>
+
+      {/* 저장 전 최종 확인 */}
+      {isConfirmOpen && selectedCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setIsConfirmOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="거래 승인건 최종 확인"
+            className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h2 className="text-base font-extrabold text-slate-900">
+                {editingTxIdV2 ? '수정 내용을 저장할까요?' : '이 내용으로 등록할까요?'}
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">저장하면 대시보드로 이동합니다.</p>
+            </div>
+            <dl className="max-h-[60vh] space-y-3 overflow-y-auto px-5 py-4 text-xs">
+              <div className="grid grid-cols-[5.5rem_1fr] gap-y-2">
+                <dt className="text-slate-500">카드사</dt>
+                <dd className="flex items-center gap-1.5 font-extrabold text-slate-900">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: CARD_COMPANY_COLORS[selectedCard].mainHex }} />
+                  {V2_CARD_DISPLAY_NAMES[selectedCard]}
+                </dd>
+                <dt className="text-slate-500">결제 방법</dt>
+                <dd className="font-extrabold text-slate-900">{selectedMethodType}</dd>
+                <dt className="text-slate-500">고객명</dt>
+                <dd className="font-extrabold text-slate-900">{customerName.trim()}</dd>
+                <dt className="text-slate-500">담당 CM</dt>
+                <dd className="text-slate-900">
+                  <strong className="font-extrabold">{selectedCmObj?.name}</strong>
+                  {selectedCmObj && (
+                    <span className="text-slate-500">
+                      {' '}
+                      · {[selectedCmObj.affiliation, selectedCmObj.employeeId, selectedCmObj.phone].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </dd>
+                {canEditApprovalDate && (
+                  <>
+                    <dt className="text-slate-500">승인일자</dt>
+                    <dd className="font-mono font-bold text-slate-900">{approvalDate}</dd>
+                  </>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {paymentSplits.map((sp, i) => (
+                  <div key={sp.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div>
+                      <p className="font-extrabold text-slate-900">
+                        {paymentSplits.length > 1 && `#${i + 1} `}
+                        {sp.paymentMethod === '다이렉트할부' ? '다이렉트' : sp.paymentMethod}
+                        {sp.paymentMethod !== '일시불' && ` ${sp.installmentMonths}개월`} · {sp.rateCategory || '일반'}
+                      </p>
+                      <p className="text-slate-500">
+                        {sp.paymentMethod === '일시불' ? `캐시백 ${sp.cashbackRate}%` : `금리 ${sp.interestRate}%`} · CM{' '}
+                        {sp.cmCommissionRate}% · AG {sp.agCommissionRate}%
+                      </p>
+                    </div>
+                    <span className="font-black tabular-nums text-slate-900">{formatKRW(sp.amount)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-900 p-3 text-white tabular-nums">
+                <div>
+                  <span className="block text-[10px] text-slate-400">총 금액</span>
+                  <span className="text-sm font-extrabold">{formatKRW(totals.totalAmount)}</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] text-slate-400">CM 수수료 ({totals.effectiveCmRate}%)</span>
+                  <span className="text-sm font-extrabold">{formatKRW(totals.totalCmCommission)}</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] text-slate-400">AG 수수료 ({totals.effectiveAgRate}%)</span>
+                  <span className="text-sm font-extrabold">{formatKRW(totals.totalAgCommission)}</span>
+                </div>
+              </div>
+            </dl>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3.5">
+              <button
+                type="button"
+                onClick={() => setIsConfirmOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+              >
+                다시 수정
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={handleConfirmSave}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-5 py-2 text-xs font-extrabold text-white hover:bg-slate-800"
+              >
+                <Check className="h-4 w-4" />
+                {editingTxIdV2 ? '수정 저장' : '등록 완료'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -12,6 +12,8 @@ import {
   RateTableImageItem,
   RateTableRowItem,
   SettlementProgressStatus,
+  StatusPatch,
+  applyStatusPatch,
   Transaction,
   TransactionDraftV2,
   User,
@@ -75,6 +77,9 @@ export interface SaveUserInput {
   rrn?: string;
   businessNumber?: string;
   employeeId?: string;
+  isBusiness?: boolean;
+  bankName?: string;
+  bankAccount?: string;
   isActive: boolean;
 }
 
@@ -111,17 +116,12 @@ interface AppContextValue {
     approvalDateOverride?: string,
     reasonOrNote?: string
   ) => ActionResult;
-  quickChangeTransactionSettlementStatus: (
-    txId: string,
-    newSettlementStatus: SettlementProgressStatus
-  ) => ActionResult;
-  bulkUpdateTransactionsV2: (
-    txIds: string[],
-    patch: {
-      status?: ApprovalStatus;
-      settlementStatus?: SettlementProgressStatus;
-    }
-  ) => ActionResult;
+  /** 진행·정산상황 변경. 되돌리기는 사유 필수이며 AG는 ADMIN 승인 요청으로 등록됨 */
+  bulkUpdateTransactionsV2: (txIds: string[], patch: StatusPatch, reason?: string) => ActionResult;
+  /** ADMIN: AG의 되돌리기 요청 승인/거절 */
+  resolveRollbackRequest: (txId: string, approve: boolean) => ActionResult;
+  isWideMode: boolean;
+  setWideMode: (on: boolean) => void;
 
   // Rate Table (이미지 / 데이터 표) & Card Promotions Admin management
   addRateTableImage: (input: {
@@ -186,6 +186,7 @@ interface AppContextValue {
 const STORAGE_KEYS = {
   CURRENT_USER_ID: 'kanadara_v6_session_user_id',
   DRAFTS_V2: 'kanadara_v6_drafts_v2',
+  WIDE_MODE: 'kanadara_wide_mode',
 };
 
 // 이전 버전의 더미 데이터가 남아있는 경우 자동 정리
@@ -246,6 +247,10 @@ function normalizeStoredTransactions(list: Transaction[]): Transaction[] {
   });
 }
 
+// 수정 입력값: undefined면 기존 값 유지, 빈 문자열이면 지움
+const keepOr = (next: string | undefined, prev: string | undefined) =>
+  next === undefined ? prev : next.trim() || undefined;
+
 function buildCmSnapshotFromUser(cmUser: User): CmProfileSnapshot {
   return {
     cmId: cmUser.id,
@@ -255,6 +260,9 @@ function buildCmSnapshotFromUser(cmUser: User): CmProfileSnapshot {
     phone: cmUser.phone || '',
     affiliation: cmUser.affiliation || '',
     employeeId: cmUser.employeeId || '',
+    isBusiness: cmUser.isBusiness,
+    bankName: cmUser.bankName || '',
+    bankAccount: cmUser.bankAccount || '',
   };
 }
 
@@ -274,6 +282,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [editingTxIdV2, setEditingTxIdV2] = useState<string | null>(null);
   const [pendingDraftIdV2, setPendingDraftIdV2] = useState<string | null>(null);
   const [isRateTableSplitOpen, setRateTableSplitOpen] = useState<boolean>(false);
+  const [isWideMode, setWideModeState] = useState<boolean>(() => loadStorage(STORAGE_KEYS.WIDE_MODE, false));
+  const setWideMode = (on: boolean) => {
+    setWideModeState(on);
+    try {
+      localStorage.setItem(STORAGE_KEYS.WIDE_MODE, JSON.stringify(on));
+    } catch {}
+  };
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
     return sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID) || null;
   });
@@ -571,6 +586,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (!input.customerName.trim()) {
       return { ok: false, message: '거래정보의 고객이름을 입력해 주세요.' };
+    }
+
+    // AG는 이미 등록된 거래의 고객/CM 정보를 바꿀 수 없음
+    const lockedTx =
+      input.txId && currentUser.role === 'AG' ? transactions.find((t) => t.id === input.txId) : undefined;
+    if (lockedTx) {
+      input = { ...input, customerName: lockedTx.customerName, cmId: lockedTx.cmId };
     }
 
     const cmUser = users.find((u) => u.id === input.cmId && u.role === 'CM');
@@ -920,129 +942,158 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { ok: true, message: `상태가 ${statusLabel}(으)로 변경되었습니다.` };
   };
 
-  // [신규] 정산상황 변경 (정산 대기 / 정산 완료 / 지급 완료(CM))
-  const quickChangeTransactionSettlementStatus = (
-    txId: string,
-    newSettlementStatus: SettlementProgressStatus
-  ): ActionResult => {
-    const tx = transactions.find((t) => t.id === txId);
-    if (!tx) return { ok: false, message: '존재하지 않는 거래입니다.' };
-    if (!canManageApprovalOf(tx)) {
-      return { ok: false, message: '담당 AG 또는 관리자만 정산상황을 변경할 수 있습니다.' };
-    }
-
-    const todayStr = getTodayDateStr();
-    const now = `${todayStr} ${nowFormatted().slice(11, 16)}`;
-
-    setTransactions((prev) =>
-      prev.map((item) =>
-        item.id !== txId
-          ? item
-          : {
-              ...item,
-              settlementStatus: newSettlementStatus,
-              updatedAt: now,
-              history: [
-                ...item.history,
-                {
-                  id: `hist-stl-${Date.now()}`,
-                  changedAt: now,
-                  actorId: currentUser!.id,
-                  actorName: currentUser!.name,
-                  actorRole: currentUser!.role,
-                  previousStatus: item.status,
-                  newStatus: item.status,
-                  actionType: 'COMMISSION_FIXED',
-                  actionLabel: `정산상황 변경: ${newSettlementStatus}`,
-                  reasonOrNote: `정산상황을 [${newSettlementStatus}]로 변경`,
-                },
-              ],
-            }
-      )
-    );
-
-    pushToast({
-      type: 'success',
-      title: `정산상황 변경: ${newSettlementStatus}`,
-      description: `${tx.id} (${tx.customerName} 고객) 정산상황이 업데이트되었습니다.`,
-    });
-    return { ok: true, message: `정산상황이 ${newSettlementStatus}(으)로 변경되었습니다.` };
+  const describePatch = (
+    tx: Transaction,
+    next: { status: ApprovalStatus; settlementStatus: SettlementProgressStatus }
+  ) => {
+    const parts: string[] = [];
+    const prevLabel = APPROVAL_STATUS_META[normalizeV2ProgressStatus(tx.status)].label;
+    const nextLabel = APPROVAL_STATUS_META[normalizeV2ProgressStatus(next.status)].label;
+    if (prevLabel !== nextLabel) parts.push(`진행상황: ${prevLabel} → ${nextLabel}`);
+    const prevSt = tx.settlementStatus || '정산 대기';
+    if (prevSt !== next.settlementStatus) parts.push(`정산상황: ${prevSt} → ${next.settlementStatus}`);
+    return parts.join(' · ');
   };
 
-  // [신규] 대시보드 다중 선택 일괄 변경 (진행상황 및 정산상황)
-  const bulkUpdateTransactionsV2 = (
-    txIds: string[],
-    patch: {
-      status?: ApprovalStatus;
-      settlementStatus?: SettlementProgressStatus;
+  // 패치를 거래에 실제 반영 (승인일자·반려사유·이력 포함)
+  const applyPatchToTx = (item: Transaction, patch: StatusPatch, now: string, todayStr: string, note: string): Transaction => {
+    const next = applyStatusPatch(item, patch);
+    const prevNorm = normalizeV2ProgressStatus(item.status);
+    const nextNorm = normalizeV2ProgressStatus(next.status);
+    return {
+      ...item,
+      status: next.status,
+      settlementStatus: next.settlementStatus,
+      approvalDate: nextNorm === 'APPROVED' ? item.approvalDate || todayStr : '',
+      rejectionReason: nextNorm === 'REJECTED' ? item.rejectionReason || '심사 기준 미충족 반려' : item.rejectionReason,
+      rollbackRequest: undefined,
+      updatedAt: now,
+      history: [
+        ...item.history,
+        {
+          id: `hist-${Date.now()}-${item.id}`,
+          changedAt: now,
+          actorId: currentUser!.id,
+          actorName: currentUser!.name,
+          actorRole: currentUser!.role,
+          previousStatus: item.status,
+          newStatus: next.status,
+          actionType:
+            nextNorm === 'APPROVED' && prevNorm !== 'APPROVED'
+              ? 'APPROVED'
+              : nextNorm === 'REJECTED' && prevNorm !== 'REJECTED'
+              ? 'REJECTED'
+              : 'COMMISSION_FIXED',
+          actionLabel: describePatch(item, next) || '상태 변경',
+          reasonOrNote: note,
+        },
+      ],
+    };
+  };
+
+  // 진행상황·정산상황 변경 (단건/다건 공용). 되돌리기는 사유 필수, AG는 ADMIN 승인 요청으로만 등록
+  const bulkUpdateTransactionsV2 = (txIds: string[], patch: StatusPatch, reason?: string): ActionResult => {
+    if (!currentUser) return { ok: false, message: '로그인이 필요합니다.' };
+    const isAdminUser = currentUser.role === 'ADMIN';
+    const results = new Map(
+      transactions
+        .filter((t) => txIds.includes(t.id) && canManageApprovalOf(t))
+        .map((t) => [t.id, applyStatusPatch(t, patch)] as const)
+        .filter(([, r]) => r.changed)
+    );
+    if (results.size === 0) {
+      pushToast({ type: 'info', title: '바뀌는 거래가 없습니다', description: '이미 같은 상태입니다.' });
+      return { ok: true, message: '변경 없음' };
     }
-  ): ActionResult => {
-    if (!currentUser) {
-      return { ok: false, message: '로그인이 필요합니다.' };
-    }
-    if (txIds.length === 0) {
-      return { ok: false, message: '선택된 거래 승인건이 없습니다.' };
-    }
-    if (!patch.status && !patch.settlementStatus) {
-      return { ok: false, message: '변경할 진행상황 또는 정산상황을 선택해 주세요.' };
+    const rollbackCount = [...results.values()].filter((r) => r.isRollback).length;
+    if (rollbackCount > 0 && !reason?.trim()) {
+      return { ok: false, message: '이전 단계로 되돌리려면 사유를 입력해 주세요.' };
     }
 
-    const idSet = new Set(txIds);
     const todayStr = getTodayDateStr();
     const now = `${todayStr} ${nowFormatted().slice(11, 16)}`;
-
-    const changeDescParts: string[] = [];
-    if (patch.status) {
-      changeDescParts.push(`진행상황: ${APPROVAL_STATUS_META[patch.status].label}`);
-    }
-    if (patch.settlementStatus) {
-      changeDescParts.push(`정산상황: ${patch.settlementStatus}`);
-    }
-    const summaryLabel = changeDescParts.join(' · ');
-
     setTransactions((prev) =>
       prev.map((item) => {
-        if (!idSet.has(item.id)) return item;
-        const nextStatus = patch.status ?? item.status;
-        const nextSettlement =
-          patch.settlementStatus ?? item.settlementStatus ?? '정산 대기';
-        const nextApprovalDate = patch.status
-          ? normalizeV2ProgressStatus(patch.status) === 'APPROVED'
-            ? item.approvalDate || todayStr
-            : ''
-          : item.approvalDate;
+        const r = results.get(item.id);
+        if (!r) return item;
+        if (r.isRollback && !isAdminUser) {
+          return {
+            ...item,
+            rollbackRequest: {
+              requestedAt: now,
+              requestedById: currentUser.id,
+              requestedByName: currentUser.name,
+              reason: reason!.trim(),
+              patch,
+              summary: describePatch(item, r),
+            },
+            updatedAt: now,
+          };
+        }
+        return applyPatchToTx(
+          item,
+          patch,
+          now,
+          todayStr,
+          r.isRollback ? `되돌리기 사유: ${reason!.trim()}` : `${results.size}건 선택 변경`
+        );
+      })
+    );
 
+    const requestCount = isAdminUser ? 0 : rollbackCount;
+    const appliedCount = results.size - requestCount;
+    pushToast({
+      type: 'success',
+      title:
+        requestCount > 0
+          ? `${appliedCount > 0 ? `${appliedCount}건 변경 · ` : ''}${requestCount}건 되돌리기 승인 요청`
+          : `${appliedCount}건 상태 변경 완료`,
+      description: requestCount > 0 ? '되돌리기는 관리자가 승인하면 반영됩니다.' : undefined,
+    });
+    return { ok: true, message: `${results.size}건 처리` };
+  };
+
+  const resolveRollbackRequest = (txId: string, approve: boolean): ActionResult => {
+    if (currentUser?.role !== 'ADMIN') return { ok: false, message: '관리자만 승인할 수 있습니다.' };
+    const tx = transactions.find((t) => t.id === txId);
+    const req = tx?.rollbackRequest;
+    if (!tx || !req) return { ok: false, message: '처리할 되돌리기 요청이 없습니다.' };
+    const todayStr = getTodayDateStr();
+    const now = `${todayStr} ${nowFormatted().slice(11, 16)}`;
+    setTransactions((prev) =>
+      prev.map((item) => {
+        if (item.id !== txId) return item;
+        if (approve) {
+          return applyPatchToTx(item, req.patch, now, todayStr, `${req.requestedByName} 요청 승인 · 사유: ${req.reason}`);
+        }
         return {
           ...item,
-          status: nextStatus,
-          settlementStatus: nextSettlement,
-          approvalDate: nextApprovalDate,
+          rollbackRequest: undefined,
           updatedAt: now,
           history: [
             ...item.history,
             {
-              id: `hist-bulk-${Date.now()}-${item.id}`,
+              id: `hist-${Date.now()}-${item.id}`,
               changedAt: now,
               actorId: currentUser.id,
               actorName: currentUser.name,
               actorRole: currentUser.role,
               previousStatus: item.status,
-              newStatus: nextStatus,
-              actionType: nextStatus === 'APPROVED' ? 'APPROVED' : 'SPLITS_UPDATED',
-              actionLabel: `일괄 변경 (${summaryLabel})`,
-              reasonOrNote: `${txIds.length}건 다중 선택 일괄 적용`,
+              newStatus: item.status,
+              actionType: 'COMMISSION_FIXED',
+              actionLabel: `되돌리기 요청 거절 (${req.summary})`,
+              reasonOrNote: `${req.requestedByName} 요청 사유: ${req.reason}`,
             },
           ],
         };
       })
     );
-
     pushToast({
-      type: 'success',
-      title: `${txIds.length}건 일괄 적용 완료`,
-      description: summaryLabel,
+      type: approve ? 'success' : 'info',
+      title: approve ? '되돌리기 요청을 승인했습니다' : '되돌리기 요청을 거절했습니다',
+      description: `${tx.customerName} 고객 · ${req.summary}`,
     });
-    return { ok: true, message: `${txIds.length}건이 일괄 변경되었습니다.` };
+    return { ok: true, message: '처리 완료' };
   };
 
   // [요구사항 1] 요율표 수정 기능은 ADMIN에게만 부여
@@ -1257,9 +1308,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           role: input.role,
           affiliation: resolvedAffiliation,
           phone: input.phone.trim(),
-          rrn: input.rrn?.trim() || u.rrn,
-          businessNumber: input.businessNumber?.trim() || u.businessNumber,
-          employeeId: input.employeeId?.trim() || u.employeeId,
+          rrn: keepOr(input.rrn, u.rrn),
+          businessNumber: keepOr(input.businessNumber, u.businessNumber),
+          employeeId: keepOr(input.employeeId, u.employeeId),
+          isBusiness: input.isBusiness ?? u.isBusiness,
+          bankName: keepOr(input.bankName, u.bankName),
+          bankAccount: keepOr(input.bankAccount, u.bankAccount),
           isActive: input.isActive,
           password: input.password?.trim() ? input.password.trim() : u.password,
         };
@@ -1298,6 +1352,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         employeeId:
           input.employeeId?.trim() ||
           `${input.role}-${String(users.length + 1).padStart(4, '0')}`,
+        isBusiness: input.isBusiness,
+        bankName: input.bankName?.trim() || undefined,
+        bankAccount: input.bankAccount?.trim() || undefined,
         isActive: input.isActive,
         createdAt: nowFormatted(),
       };
@@ -1652,8 +1709,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logout,
         saveAgTransactionRequest,
         quickChangeTransactionStatus,
-        quickChangeTransactionSettlementStatus,
         bulkUpdateTransactionsV2,
+        resolveRollbackRequest,
+        isWideMode,
+        setWideMode,
         addRateTableImage,
         deleteRateTableImage,
         saveRateTableRow,

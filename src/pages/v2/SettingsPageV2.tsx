@@ -158,9 +158,11 @@ export const SettingsPageV2: React.FC = () => {
   const [cmName, setCmName] = useState<string>('');
   const [cmAffiliation, setCmAffiliation] = useState<string>('');
   const [cmPhone, setCmPhone] = useState<string>('');
-  const [cmBusinessNo, setCmBusinessNo] = useState<string>('');
-  const [cmRrn, setCmRrn] = useState<string>('');
   const [cmEmployeeId, setCmEmployeeId] = useState<string>('');
+  const [cmIsBusiness, setCmIsBusiness] = useState<boolean>(false);
+  const [cmIdNumber, setCmIdNumber] = useState<string>(''); // 사업자면 사업자등록번호, 아니면 주민등록번호
+  const [cmBankName, setCmBankName] = useState<string>('');
+  const [cmBankAccount, setCmBankAccount] = useState<string>('');
   const [cmSearch, setCmSearch] = useState<string>('');
 
   // 수동 TSV 붙여넣기 토글 (보조 기능)
@@ -174,7 +176,7 @@ export const SettingsPageV2: React.FC = () => {
     const kw = cmSearch.trim().toLowerCase();
     if (!kw) return list;
     return list.filter((u) =>
-      [u.name, u.affiliation, u.phone, u.employeeId || '']
+      [u.name, u.affiliation, u.phone, u.employeeId || '', u.bankName || '']
         .join(' ')
         .toLowerCase()
         .includes(kw)
@@ -194,9 +196,11 @@ export const SettingsPageV2: React.FC = () => {
     setCmName('');
     setCmAffiliation('');
     setCmPhone('');
-    setCmBusinessNo('');
-    setCmRrn('');
     setCmEmployeeId('');
+    setCmIsBusiness(false);
+    setCmIdNumber('');
+    setCmBankName('');
+    setCmBankAccount('');
   };
 
   const handleEditCm = (cm: User) => {
@@ -204,9 +208,12 @@ export const SettingsPageV2: React.FC = () => {
     setCmName(cm.name);
     setCmAffiliation(cm.affiliation);
     setCmPhone(cm.phone);
-    setCmBusinessNo(cm.businessNumber || '');
-    setCmRrn(cm.rrn || '');
     setCmEmployeeId(cm.employeeId || '');
+    const isBiz = cm.isBusiness ?? !!cm.businessNumber;
+    setCmIsBusiness(isBiz);
+    setCmIdNumber((isBiz ? cm.businessNumber : cm.rrn) || '');
+    setCmBankName(cm.bankName || '');
+    setCmBankAccount(cm.bankAccount || '');
   };
 
   const handleSaveCm = (e: React.FormEvent) => {
@@ -219,9 +226,13 @@ export const SettingsPageV2: React.FC = () => {
       role: 'CM',
       affiliation: cmAffiliation,
       phone: cmPhone,
-      businessNumber: cmBusinessNo || undefined,
-      rrn: cmRrn || undefined,
-      employeeId: cmEmployeeId || undefined,
+      // 사업자 여부에 따라 한쪽 번호만 남김 ('' = 지움)
+      businessNumber: cmIsBusiness ? cmIdNumber : '',
+      rrn: cmIsBusiness ? '' : cmIdNumber,
+      employeeId: cmEmployeeId,
+      isBusiness: cmIsBusiness,
+      bankName: cmBankName,
+      bankAccount: cmBankAccount,
       isActive: existing ? existing.isActive : true,
     });
     if (res.ok) {
@@ -237,9 +248,6 @@ export const SettingsPageV2: React.FC = () => {
       role: 'CM',
       affiliation: cm.affiliation,
       phone: cm.phone,
-      businessNumber: cm.businessNumber,
-      rrn: cm.rrn,
-      employeeId: cm.employeeId,
       isActive: !cm.isActive,
     });
   };
@@ -251,7 +259,7 @@ export const SettingsPageV2: React.FC = () => {
         <div>
           <h1 className="text-lg font-extrabold tracking-tight text-slate-900">설정</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            AG 계정 발급(ADMIN 전용), CM 정보 저장, 구글 시트 조건 불러오기(Pull) · 내역 저장하기(Push)를 관리합니다.
+            {isAdmin ? 'AG 계정 발급, ' : ''}CM 정보 저장, 구글 시트 조건 불러오기(Pull) · 내역 저장하기(Push)를 관리합니다.
           </p>
         </div>
 
@@ -265,6 +273,7 @@ export const SettingsPageV2: React.FC = () => {
       {/* =================================================================== */}
       {/* 1. ADMIN 전용: AG 계정 발급 및 관리 */}
       {/* =================================================================== */}
+      {isAdmin && (
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
@@ -540,6 +549,7 @@ export const SettingsPageV2: React.FC = () => {
           </>
         )}
       </section>
+      )}
 
       {/* =================================================================== */}
       {/* 2. CM 정보 저장하기 및 등록 목록 관리 */}
@@ -552,7 +562,7 @@ export const SettingsPageV2: React.FC = () => {
               CM 정보 저장하기
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              저장한 CM은 [거래 승인건 등록] 4단계와 [월별 수수료 정산] 필터에서 바로 선택할 수 있습니다.
+              저장한 CM은 [거래 승인건 등록]의 담당 CM 검색과 [월별 수수료 정산] 필터에서 바로 선택할 수 있습니다.
             </p>
           </div>
           <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
@@ -580,12 +590,9 @@ export const SettingsPageV2: React.FC = () => {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label
-                htmlFor="cm-name"
-                className="block text-xs font-bold text-slate-700 mb-1"
-              >
+              <label htmlFor="cm-name" className="block text-xs font-bold text-slate-700 mb-1">
                 CM 이름 <span className="text-rose-500">*</span>
               </label>
               <input
@@ -598,12 +605,22 @@ export const SettingsPageV2: React.FC = () => {
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
               />
             </div>
-
             <div>
-              <label
-                htmlFor="cm-affiliation"
-                className="block text-xs font-bold text-slate-700 mb-1"
-              >
+              <label htmlFor="cm-employee-id" className="block text-xs font-bold text-slate-700 mb-1">
+                사번 <span className="text-rose-500">*</span>
+              </label>
+              <input
+                id="cm-employee-id"
+                type="text"
+                required
+                value={cmEmployeeId}
+                onChange={(e) => setCmEmployeeId(e.target.value)}
+                placeholder="예: CM-0012"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="cm-affiliation" className="block text-xs font-bold text-slate-700 mb-1">
                 소속 / 대리점 <span className="text-rose-500">*</span>
               </label>
               <input
@@ -616,12 +633,8 @@ export const SettingsPageV2: React.FC = () => {
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
               />
             </div>
-
             <div>
-              <label
-                htmlFor="cm-phone"
-                className="block text-xs font-bold text-slate-700 mb-1"
-              >
+              <label htmlFor="cm-phone" className="block text-xs font-bold text-slate-700 mb-1">
                 연락처
               </label>
               <input
@@ -635,59 +648,88 @@ export const SettingsPageV2: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label
-                htmlFor="cm-bizno"
-                className="block text-[11px] font-semibold text-slate-500 mb-1"
-              >
-                사업자등록번호 (선택)
+              <span className="block text-xs font-bold text-slate-700 mb-1">사업자 여부</span>
+              <div role="radiogroup" aria-label="사업자 여부" className="grid grid-cols-2 rounded-lg border border-slate-300 bg-white p-0.5">
+                {[
+                  { value: true, label: '사업자' },
+                  { value: false, label: '개인 (비사업자)' },
+                ].map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    role="radio"
+                    aria-checked={cmIsBusiness === opt.value}
+                    onClick={() => setCmIsBusiness(opt.value)}
+                    className={`rounded-md px-2 py-1.5 text-xs font-bold transition-colors ${
+                      cmIsBusiness === opt.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label htmlFor="cm-id-number" className="block text-xs font-bold text-slate-700 mb-1">
+                {cmIsBusiness ? '사업자등록번호' : '주민등록번호'}
               </label>
               <input
-                id="cm-bizno"
+                id="cm-id-number"
                 type="text"
-                value={cmBusinessNo}
-                onChange={(e) => setCmBusinessNo(e.target.value)}
-                placeholder="예: 214-19-48102"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-slate-900 focus:outline-none"
+                inputMode="numeric"
+                value={cmIdNumber}
+                onChange={(e) => setCmIdNumber(e.target.value)}
+                placeholder={cmIsBusiness ? '000-00-00000' : '000000-0000000'}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none font-mono"
               />
             </div>
-
             <div>
-              <label
-                htmlFor="cm-rrn"
-                className="block text-[11px] font-semibold text-slate-500 mb-1"
-              >
-                주민등록번호 (선택)
+              <label htmlFor="cm-bank-name" className="block text-xs font-bold text-slate-700 mb-1">
+                계좌 은행
               </label>
               <input
-                id="cm-rrn"
+                id="cm-bank-name"
                 type="text"
-                value={cmRrn}
-                onChange={(e) => setCmRrn(e.target.value)}
-                placeholder="000000-0000000"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-slate-900 focus:outline-none"
+                value={cmBankName}
+                onChange={(e) => setCmBankName(e.target.value)}
+                placeholder="예: 국민은행"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
               />
             </div>
-
-            <div className="flex items-end">
-              <button
-                type="submit"
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-extrabold text-white hover:bg-slate-800 transition-colors"
-              >
-                {editingCmId ? (
-                  <>
-                    <Check className="h-4 w-4" />
-                    CM 정보 수정 저장
-                  </>
-                ) : (
-                  <>
-                    <Plus className="h-4 w-4" />
-                    CM 정보 저장하기
-                  </>
-                )}
-              </button>
+            <div>
+              <label htmlFor="cm-bank-account" className="block text-xs font-bold text-slate-700 mb-1">
+                계좌번호
+              </label>
+              <input
+                id="cm-bank-account"
+                type="text"
+                value={cmBankAccount}
+                onChange={(e) => setCmBankAccount(e.target.value)}
+                placeholder="예: 123-456-789012"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-slate-900 focus:outline-none font-mono"
+              />
             </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-5 py-2 text-xs font-extrabold text-white hover:bg-slate-800 transition-colors"
+            >
+              {editingCmId ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  CM 정보 수정 저장
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" />
+                  CM 정보 저장하기
+                </>
+              )}
+            </button>
           </div>
         </form>
 
@@ -731,9 +773,15 @@ export const SettingsPageV2: React.FC = () => {
                         )}
                       </div>
                       <p className="text-xs text-slate-400 font-mono mt-0.5">
-                        {cm.phone}
-                        {cm.businessNumber ? ` · 사업자 ${cm.businessNumber}` : ''} · 누적 거래{' '}
-                        {count}건
+                        {[
+                          cm.employeeId && `사번 ${cm.employeeId}`,
+                          cm.phone,
+                          (cm.isBusiness ?? !!cm.businessNumber) ? '사업자' : '개인',
+                          cm.bankName && `${cm.bankName} ${cm.bankAccount || ''}`.trim(),
+                          `누적 거래 ${count}건`,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </p>
                     </div>
                   </div>

@@ -12,6 +12,9 @@ export interface User {
   rrn?: string; // 주민등록번호
   businessNumber?: string; // 사업자등록번호
   employeeId?: string; // 사번
+  isBusiness?: boolean; // 사업자 여부 (true: 사업자등록번호 / false: 주민등록번호)
+  bankName?: string; // 계좌 은행
+  bankAccount?: string; // 계좌번호
   isActive: boolean;
   createdAt: string;
 }
@@ -24,6 +27,9 @@ export interface CmProfileSnapshot {
   phone: string;
   affiliation: string;
   employeeId: string;
+  isBusiness?: boolean;
+  bankName?: string;
+  bankAccount?: string;
 }
 
 export interface AgCmAssignment {
@@ -400,7 +406,75 @@ export interface ConditionSnapshot {
   appliedBasisNote?: string;
 }
 
-export type SettlementProgressStatus = '정산 대기' | '정산 완료' | '지급 완료(CM)';
+// 정산 완료(카드사 정산 안내)와 지급 완료(CM 실지급)는 따로 일어나므로 둘 다 켜질 수 있음 → '정산·지급 완료'
+export type SettlementProgressStatus = '정산 대기' | '정산 완료' | '지급 완료(CM)' | '정산·지급 완료';
+
+export type SettlementFlags = { settled: boolean; paid: boolean };
+
+export function settlementFlagsOf(st?: SettlementProgressStatus): SettlementFlags {
+  const s = st || '정산 대기';
+  return {
+    settled: s === '정산 완료' || s === '정산·지급 완료',
+    paid: s === '지급 완료(CM)' || s === '정산·지급 완료',
+  };
+}
+
+export function settlementFromFlags(f: SettlementFlags): SettlementProgressStatus {
+  if (f.settled && f.paid) return '정산·지급 완료';
+  if (f.settled) return '정산 완료';
+  if (f.paid) return '지급 완료(CM)';
+  return '정산 대기';
+}
+
+/** 진행상황/정산상황 변경 요청. settlement는 지정한 플래그만 바꿈 */
+export interface StatusPatch {
+  status?: ApprovalStatus;
+  settlement?: Partial<SettlementFlags>;
+}
+
+// 되돌리기(진행 단계 하향 또는 정산 플래그 해제) 판단용 순위
+const PROGRESS_RANK: Record<'WAITING' | 'APPROVED' | 'REJECTED', number> = {
+  WAITING: 0,
+  REJECTED: 1,
+  APPROVED: 2,
+};
+
+/** 패치를 적용한 결과와, 그게 이전 단계로 되돌리는 변경인지 */
+export function applyStatusPatch(
+  tx: Pick<Transaction, 'status' | 'settlementStatus'>,
+  patch: StatusPatch
+): { status: ApprovalStatus; settlementStatus: SettlementProgressStatus; isRollback: boolean; changed: boolean } {
+  const prevFlags = settlementFlagsOf(tx.settlementStatus);
+  const status = patch.status ?? tx.status;
+  const prevNorm = normalizeV2ProgressStatus(tx.status);
+  const nextNorm = normalizeV2ProgressStatus(status);
+  let flags: SettlementFlags = { ...prevFlags, ...patch.settlement };
+  // 카드 승인으로 넘어가면 정산상황은 정산 대기부터 시작
+  // 요청 대기로 되돌리면 정산상황도 정산 대기로 초기화
+  if (nextNorm !== prevNorm && (nextNorm === 'APPROVED' || nextNorm === 'WAITING')) {
+    flags = { settled: false, paid: false };
+  }
+  const isRollback =
+    (patch.status !== undefined && PROGRESS_RANK[nextNorm] < PROGRESS_RANK[prevNorm]) ||
+    (patch.settlement !== undefined &&
+      ((prevFlags.settled && !flags.settled) || (prevFlags.paid && !flags.paid)));
+  const settlementStatus = settlementFromFlags(flags);
+  return {
+    status,
+    settlementStatus,
+    isRollback,
+    changed: nextNorm !== prevNorm || settlementStatus !== (tx.settlementStatus || '정산 대기'),
+  };
+}
+
+export interface RollbackRequest {
+  requestedAt: string;
+  requestedById: string;
+  requestedByName: string;
+  reason: string;
+  patch: StatusPatch;
+  summary: string; // 예: '진행상황: 카드 승인 → 요청 대기'
+}
 
 export const SETTLEMENT_PROGRESS_STATUS_LIST: SettlementProgressStatus[] = [
   '정산 대기',
@@ -427,6 +501,11 @@ export const SETTLEMENT_PROGRESS_STATUS_META: Record<
     badgeClass: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/25',
     dotClass: 'bg-emerald-500',
   },
+  '정산·지급 완료': {
+    label: '정산·지급 완료',
+    badgeClass: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-600/40',
+    dotClass: 'bg-emerald-600',
+  },
 };
 
 export interface Transaction {
@@ -451,6 +530,7 @@ export interface Transaction {
   status: ApprovalStatus; // 진행상황
   settlementStatus?: SettlementProgressStatus; // 정산상황 (정산 대기 / 정산 완료 / 지급 완료(CM))
   rejectionReason?: string;
+  rollbackRequest?: RollbackRequest; // AG가 신청한 되돌리기 (ADMIN 승인 대기)
   cardApplication: CardApplicationRecord;
   slip?: SlipSubmission;
   sheetSync: SheetSyncRecord;

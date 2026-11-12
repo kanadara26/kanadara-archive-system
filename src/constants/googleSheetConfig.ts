@@ -671,6 +671,10 @@ export const USER_CM_SHEET_HEADERS = [
   '사번',
   '활성상태',
   '생성일시',
+  // 새 열은 항상 맨 뒤에 추가 (기존 시트 열 위치 유지)
+  '사업자여부',
+  '계좌은행',
+  '계좌번호',
 ];
 
 export function serializeUsersTo2D(users: User[]): (string | number)[][] {
@@ -687,6 +691,9 @@ export function serializeUsersTo2D(users: User[]): (string | number)[][] {
     u.employeeId || '',
     u.isActive ? 'Y' : 'N',
     u.createdAt || nowFormatted(),
+    u.isBusiness === undefined ? '' : u.isBusiness ? 'Y' : 'N',
+    u.bankName || '',
+    u.bankAccount || '',
   ]);
   return [USER_CM_SHEET_HEADERS, ...body];
 }
@@ -711,6 +718,11 @@ export function parseUsersFrom2D(rows: (string | number)[][]): User[] {
     const activeStr = String(r[10] || '').trim().toUpperCase();
     const isActive = activeStr !== 'N' && activeStr !== 'FALSE' && activeStr !== '0';
     const createdAt = String(r[11] || '').trim() || nowFormatted();
+    const bizFlag = String(r[12] ?? '').trim().toUpperCase();
+    // 사업자여부 칸이 비어 있으면 사업자번호 유무로 추정
+    const isBusiness = bizFlag ? bizFlag === 'Y' : businessNumber ? true : rrn ? false : undefined;
+    const bankName = String(r[13] ?? '').trim() || undefined;
+    const bankAccount = String(r[14] ?? '').trim() || undefined;
 
     result.push({
       id,
@@ -723,6 +735,9 @@ export function parseUsersFrom2D(rows: (string | number)[][]): User[] {
       businessNumber,
       rrn,
       employeeId,
+      isBusiness,
+      bankName,
+      bankAccount,
       isActive,
       createdAt,
     });

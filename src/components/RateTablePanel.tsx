@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { fixDecimal } from './DecimalInput';
 import {
   Check,
   Copy,
@@ -784,11 +785,11 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   </label>
                   <input
                     id="rt-cashback-input"
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={rowMethod === '일시불' ? rowCashback : '0'}
                     disabled={rowMethod !== '일시불'}
-                    onChange={(e) => setRowCashback(e.target.value)}
+                    onChange={(e) => setRowCashback(fixDecimal(e.target.value))}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-slate-700"
                   />
                 </div>
@@ -798,25 +799,12 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   </label>
                   <input
                     id="rt-interest-input"
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={rowMethod === '일시불' ? '0' : rowInterest}
                     disabled={rowMethod === '일시불'}
-                    onChange={(e) => setRowInterest(e.target.value)}
+                    onChange={(e) => setRowInterest(fixDecimal(e.target.value))}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-100 text-xs font-bold text-slate-900"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="rt-ag-rate-input" className="block text-xs font-bold text-slate-700 mb-1">
-                    AG 수수료율 (%)
-                  </label>
-                  <input
-                    id="rt-ag-rate-input"
-                    type="number"
-                    step="0.01"
-                    value={rowAgRate}
-                    onChange={(e) => setRowAgRate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
                   />
                 </div>
                 <div>
@@ -825,11 +813,24 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   </label>
                   <input
                     id="rt-cm-rate-input"
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={rowCmRate}
-                    onChange={(e) => setRowCmRate(e.target.value)}
+                    onChange={(e) => setRowCmRate(fixDecimal(e.target.value))}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rt-ag-rate-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    AG 수수료율 (%)
+                  </label>
+                  <input
+                    id="rt-ag-rate-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={rowAgRate}
+                    onChange={(e) => setRowAgRate(fixDecimal(e.target.value))}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
                   />
                 </div>
               </div>
@@ -875,8 +876,8 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                   <th className="whitespace-nowrap px-2.5 py-2.5">적용구간 / 개월</th>
                   <th className="whitespace-nowrap px-2.5 py-2.5 text-right">캐시백</th>
                   <th className="whitespace-nowrap px-2.5 py-2.5 text-right">할부금리</th>
-                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">AG 수수료</th>
                   <th className="whitespace-nowrap px-2.5 py-2.5 text-right">CM 수수료</th>
+                  <th className="whitespace-nowrap px-2.5 py-2.5 text-right">AG 수수료</th>
                   <th className="whitespace-nowrap px-3 py-2.5">비고 / 실행일</th>
                   {canEdit && <th className="px-2.5 py-2.5 text-right"><span className="sr-only">관리</span></th>}
                 </tr>
@@ -919,10 +920,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         {!isLump ? `${row.interestRate.toFixed(2)}%` : <span className="text-slate-300">-</span>}
                       </td>
                       <td className="whitespace-nowrap px-2.5 py-3 text-right font-bold tabular-nums text-slate-700">
-                        {row.agCommissionRate.toFixed(2)}%
+                        {row.cmCommissionRate.toFixed(2)}%
                       </td>
                       <td className="whitespace-nowrap px-2.5 py-3 text-right font-bold tabular-nums text-slate-700">
-                        {row.cmCommissionRate.toFixed(2)}%
+                        {row.agCommissionRate.toFixed(2)}%
                       </td>
                       <td className="px-3 py-3 text-[11px] text-slate-600">
                         <div>{row.remark}</div>
@@ -1143,10 +1144,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     최소 금액 (원)
                   </label>
                   <input
-                    type="number"
-                    step="1000000"
+                    type="text"
+                    inputMode="decimal"
                     value={promoMinAmount}
-                    onChange={(e) => setPromoMinAmount(e.target.value)}
+                    onChange={(e) => setPromoMinAmount(fixDecimal(e.target.value))}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
                   />
                 </div>
@@ -1155,10 +1156,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                     최대 금액 (원, 비워두면 제한없음)
                   </label>
                   <input
-                    type="number"
-                    step="1000000"
+                    type="text"
+                    inputMode="decimal"
                     value={promoMaxAmount}
-                    onChange={(e) => setPromoMaxAmount(e.target.value)}
+                    onChange={(e) => setPromoMaxAmount(fixDecimal(e.target.value))}
                     placeholder="제한 없음"
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                   />
@@ -1194,12 +1195,10 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       캐시백 요율 변동 (±%)
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="-20"
-                      max="20"
+                      type="text"
+                      inputMode="decimal"
                       value={promoCashbackDelta}
-                      onChange={(e) => setPromoCashbackDelta(e.target.value)}
+                      onChange={(e) => setPromoCashbackDelta(fixDecimal(e.target.value))}
                       placeholder="예: -0.20 또는 0.15"
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
@@ -1209,29 +1208,12 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       할부 금리 변동 (±%)
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="-20"
-                      max="20"
+                      type="text"
+                      inputMode="decimal"
                       value={promoInterestDelta}
-                      onChange={(e) => setPromoInterestDelta(e.target.value)}
+                      onChange={(e) => setPromoInterestDelta(fixDecimal(e.target.value))}
                       placeholder="예: -0.50 (금리인하)"
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      AG 요율 변동 (±%)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="-20"
-                      max="20"
-                      value={promoAgRate}
-                      onChange={(e) => setPromoAgRate(e.target.value)}
-                      placeholder="예: 0.15 또는 -0.20"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
                   </div>
                   <div>
@@ -1239,13 +1221,24 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                       CM 요율 변동 (±%)
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="-20"
-                      max="20"
+                      type="text"
+                      inputMode="decimal"
                       value={promoCmRate}
-                      onChange={(e) => setPromoCmRate(e.target.value)}
+                      onChange={(e) => setPromoCmRate(fixDecimal(e.target.value))}
                       placeholder="예: 0.10 또는 -0.10"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      AG 요율 변동 (±%)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={promoAgRate}
+                      onChange={(e) => setPromoAgRate(fixDecimal(e.target.value))}
+                      placeholder="예: 0.15 또는 -0.20"
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-extrabold text-slate-700"
                     />
                   </div>
@@ -1254,25 +1247,25 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      AG 추가/차감 인센티브 정액 (원, ± 가능)
+                      CM 추가/차감 인센티브 정액 (원, ± 가능)
                     </label>
                     <input
-                      type="number"
-                      step="10000"
-                      value={promoAgAmount}
-                      onChange={(e) => setPromoAgAmount(e.target.value)}
+                      type="text"
+                      inputMode="decimal"
+                      value={promoCmAmount}
+                      onChange={(e) => setPromoCmAmount(fixDecimal(e.target.value))}
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
                     />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      CM 추가/차감 인센티브 정액 (원, ± 가능)
+                      AG 추가/차감 인센티브 정액 (원, ± 가능)
                     </label>
                     <input
-                      type="number"
-                      step="10000"
-                      value={promoCmAmount}
-                      onChange={(e) => setPromoCmAmount(e.target.value)}
+                      type="text"
+                      inputMode="decimal"
+                      value={promoAgAmount}
+                      onChange={(e) => setPromoAgAmount(fixDecimal(e.target.value))}
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700"
                     />
                   </div>
@@ -1444,28 +1437,6 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         할부 금리 반영: <strong>{formatSignedRate(intDelta)}</strong>
                       </div>
                     )}
-                      <div
-                        className={`rounded-lg border px-3 py-1.5 font-bold ${
-                          p.agIncentiveRate < 0 || p.agIncentiveAmount < 0
-                            ? 'bg-rose-50 border-rose-200 text-rose-900'
-                            : 'bg-slate-50 border-slate-200 text-slate-800'
-                        }`}
-                      >
-                        AG 요율 반영:{' '}
-                        <strong
-                          className={
-                            p.agIncentiveRate < 0 ? 'text-rose-700' : 'text-slate-900'
-                          }
-                        >
-                          {formatSignedRate(p.agIncentiveRate)}
-                        </strong>
-                        {p.agIncentiveAmount !== 0 && (
-                          <>
-                            {' '}
-                            · 정액 <strong>{formatSignedKRW(p.agIncentiveAmount)}</strong>
-                          </>
-                        )}
-                      </div>
                     <div
                       className={`rounded-lg border px-3 py-1.5 font-bold ${
                         p.cmIncentiveRate < 0 || p.cmIncentiveAmount < 0
@@ -1488,6 +1459,28 @@ export const RateTablePanel: React.FC<{ onCloseSplit?: () => void }> = ({ onClos
                         </>
                       )}
                     </div>
+                      <div
+                        className={`rounded-lg border px-3 py-1.5 font-bold ${
+                          p.agIncentiveRate < 0 || p.agIncentiveAmount < 0
+                            ? 'bg-rose-50 border-rose-200 text-rose-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        AG 요율 반영:{' '}
+                        <strong
+                          className={
+                            p.agIncentiveRate < 0 ? 'text-rose-700' : 'text-slate-900'
+                          }
+                        >
+                          {formatSignedRate(p.agIncentiveRate)}
+                        </strong>
+                        {p.agIncentiveAmount !== 0 && (
+                          <>
+                            {' '}
+                            · 정액 <strong>{formatSignedKRW(p.agIncentiveAmount)}</strong>
+                          </>
+                        )}
+                      </div>
                   </div>
 
                   {/* 불릿포인트 장문 설명 */}
