@@ -285,6 +285,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
   const [paymentSplits, setPaymentSplits] = useState<PaymentSplitItem[]>([]);
   const [selectedRateRowIds, setSelectedRateRowIds] = useState<Record<number, string>>({});
   const [rateTableCategoryFilter, setRateTableCategoryFilter] = useState<string>('전체');
+  // 우측 요율표: 기본은 적용 중인 옵션만, 적용을 해제하면 전체 옵션 표시
+  const [showAllRates, setShowAllRates] = useState<boolean>(false);
 
   // 고객 / CM 정보 및 비고
   const [customerName, setCustomerName] = useState<string>('');
@@ -421,6 +423,20 @@ export const TransactionRegisterPageV2: React.FC = () => {
     );
   }, [matchingRateRows, rateTableCategoryFilter]);
 
+  const appliedRateIds = Object.values(selectedRateRowIds);
+  const isRateListCollapsed = !showAllRates && appliedRateIds.length > 0;
+  const visibleRateRows = isRateListCollapsed
+    ? matchingRateRows.filter((r) => appliedRateIds.includes(r.id))
+    : displayedRateRows;
+
+  // 적용 중인 옵션을 누르면 적용 해제하고 다른 옵션을 펼침
+  const handleUnapplyRateRow = (rowId: string) => {
+    setSelectedRateRowIds((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([, id]) => id !== rowId))
+    );
+    setShowAllRates(true);
+  };
+
   // 결제 합계 및 예상 수수료 실시간 계산
   const totals = useMemo(() => calcSplitTotals(paymentSplits), [paymentSplits]);
 
@@ -469,6 +485,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
   ) => {
     const defaultSingleAmount = 30000000;
     setRateTableCategoryFilter('전체');
+    setShowAllRates(false);
 
     if (methodType === '일시불') {
       const matchedRow = findBestRateRowForAmount(
@@ -1288,7 +1305,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
         {/* ================================================================= */}
         {/* STEP 2. 고객·CM 및 결제 정보 입력 + 우측 요율표 */}
         {/* ================================================================= */}
-        <section className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+        <section className="rounded-xl border border-slate-200 bg-white overflow-clip shadow-2xs">
           <button
             type="button"
             onClick={() => {
@@ -1575,7 +1592,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
 
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12 lg:items-stretch">
                 {/* 좌측: 결제 정보 입력 영역 (7컬럼) */}
                 <div className="lg:col-span-7 space-y-4">
                   {/* 기본 자동입력 및 일자 바 (회색 비활성화) */}
@@ -1801,36 +1818,6 @@ export const TransactionRegisterPageV2: React.FC = () => {
                               placeholder="결제 금액 입력 (예: 30,000,000)"
                               className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-base font-extrabold text-slate-900 tabular-nums focus:border-slate-900 focus:outline-none"
                             />
-
-                            {/* 결제 금액대에 맞춰 자동 선택된 조건 표시 배너 */}
-                            {matchedRateRow && (
-                              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                    <Sparkles className="h-2.5 w-2.5" />
-                                    금액대 자동 선택
-                                  </span>
-                                  <span className="inline-flex shrink-0 items-center rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
-                                    {normalizeCategoryName(matchedRateRow.category)}
-                                  </span>
-                                  <span className="font-extrabold text-slate-900 truncate">
-                                    {matchedRateRow.amountTier}
-                                  </span>
-                                  {matchedRateRow.remark && (
-                                    <span className="text-slate-500 truncate hidden sm:inline">
-                                      · {matchedRateRow.remark}
-                                    </span>
-                                  )}
-                                </div>
-                                <span className="font-mono text-[11px] font-bold text-slate-700 shrink-0">
-                                  {isLumpSum
-                                    ? `캐시백 ${matchedRateRow.cashbackRate}%`
-                                    : `금리 ${matchedRateRow.interestRate}%`}{' '}
-                                  · CM {matchedRateRow.cmCommissionRate}% · AG{' '}
-                                  {matchedRateRow.agCommissionRate}%
-                                </span>
-                              </div>
-                            )}
                           </div>
 
                           {/* 2. 결제방법별 맞춤 조건 입력칸 (일시불 vs 할부/다이렉트) */}
@@ -2025,7 +2012,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
                 </div>
 
                 {/* 우측: 선택된 카드사 · 결제방법 맞춤 간소화 요율표 (5컬럼) */}
-                <div className="lg:col-span-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                <div className="lg:relative lg:col-span-5">
+                <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:absolute lg:inset-0">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
                     <div>
                       <h3 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
@@ -2033,16 +2021,16 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         {V2_CARD_DISPLAY_NAMES[selectedCard]} · {selectedMethodType} 요율표
                       </h3>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        결제 금액 및 구분(일반/저금리 등)에 맞춰 자동 선택되며 클릭해 변경할 수 있습니다.
+                        결제 금액에 맞는 조건이 자동 적용됩니다. 적용 중인 조건을 누르면 해제되고 다른 조건이 보입니다.
                       </p>
                     </div>
                     <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 border border-slate-200">
-                      {displayedRateRows.length}개 조건
+                      {isRateListCollapsed ? `적용 ${visibleRateRows.length} / ${matchingRateRows.length}개` : `${displayedRateRows.length}개 조건`}
                     </span>
                   </div>
 
                   {/* 우측 요율표 구분 필터 탭 */}
-                  {rateTableCategories.length > 2 && (
+                  {!isRateListCollapsed && rateTableCategories.length > 2 && (
                     <div className="flex flex-wrap items-center gap-1">
                       {rateTableCategories.map((cat) => (
                         <button
@@ -2066,8 +2054,9 @@ export const TransactionRegisterPageV2: React.FC = () => {
                       해당 조건의 등록된 요율표가 없습니다. 좌측 입력란에 직접 요율을 입력해 주세요.
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-[380px] overflow-y-auto pr-0.5">
-                      {displayedRateRows.map((row) => {
+                    <>
+                    <div className="max-h-[380px] space-y-2 overflow-y-auto pr-0.5 lg:max-h-none lg:min-h-0 lg:flex-1">
+                      {visibleRateRows.map((row) => {
                         const isSelectedRow = Object.values(selectedRateRowIds).includes(
                           row.id
                         );
@@ -2086,7 +2075,15 @@ export const TransactionRegisterPageV2: React.FC = () => {
                           <button
                             key={row.id}
                             type="button"
-                            onClick={() => handleApplyRateRow(row)}
+                            onClick={() => {
+                              if (isSelectedRow) {
+                                handleUnapplyRateRow(row.id);
+                              } else {
+                                handleApplyRateRow(row);
+                                setShowAllRates(false);
+                              }
+                            }}
+                            title={isSelectedRow ? '눌러서 적용 해제하고 다른 옵션 보기' : '이 조건 적용'}
                             className={`w-full rounded-xl border p-3 text-left transition-all ${
                               isSelectedRow
                                 ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
@@ -2123,7 +2120,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                 {isSelectedRow && (
                                   <span className="inline-flex items-center gap-0.5 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">
                                     <Check className="h-2.5 w-2.5 stroke-[3]" />
-                                    적용중
+                                    적용중 · 눌러서 해제
                                   </span>
                                 )}
                               </div>
@@ -2208,14 +2205,24 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         );
                       })}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRates((v) => !v)}
+                      hidden={appliedRateIds.length === 0}
+                      className="shrink-0 rounded-lg border border-slate-300 bg-white py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    >
+                      {isRateListCollapsed ? `다른 조건 보기 (${matchingRateRows.length})` : '적용 중인 조건만 보기'}
+                    </button>
+                    </>
                   )}
+                </div>
                 </div>
               </div>
 
-              {/* 비고 및 최종 저장 */}
-              <div className="pt-5 border-t border-slate-200 space-y-5">
+              {/* 비고 및 최종 저장 (contents: 하단 고정 바가 2단계 전체 높이 안에서 따라오도록) */}
+              <div className="contents">
                 {/* 비고 (선택) */}
-                <div>
+                <div className="border-t border-slate-200 pt-5">
                   <label
                     htmlFor="v2-memo"
                     className="block text-xs font-extrabold text-slate-800 mb-1.5"
@@ -2234,7 +2241,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
                 </div>
 
                 {/* 최종 등록 요약 및 제출 버튼 */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                <div className="sticky bottom-[4.75rem] z-20 mt-5 flex flex-col gap-3 rounded-xl border border-slate-300 bg-white/95 p-4 shadow-lg backdrop-blur-xs sm:flex-row sm:items-center sm:justify-between md:bottom-4">
                   <div className="space-y-0.5 text-xs">
                     <div className="font-extrabold text-slate-900">
                       {selectedCard ? V2_CARD_DISPLAY_NAMES[selectedCard] : '-'} ·{' '}
