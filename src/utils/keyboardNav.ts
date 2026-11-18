@@ -14,11 +14,11 @@ function focusables(root: Element): HTMLElement[] {
   );
 }
 
-/** 화면 순서상 다음 입력칸/버튼으로 포커스 이동 (선택 후 자동 넘어가기용) */
-export function focusNext(from: HTMLElement) {
+/** 화면 순서상 다음(step=1)/이전(step=-1) 입력칸·버튼으로 포커스 이동 */
+export function focusNext(from: HTMLElement, step = 1) {
   const list = focusables(from.closest('[role="dialog"], header, main') || document.body);
-  const next = list[list.indexOf(from) + 1];
-  next?.focus();
+  const i = list.indexOf(from);
+  if (i !== -1) list[i + step]?.focus();
 }
 
 export function useArrowKeyNavigation() {

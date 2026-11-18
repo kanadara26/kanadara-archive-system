@@ -995,6 +995,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkUpdateTransactionsV2 = (txIds: string[], patch: StatusPatch, reason?: string): ActionResult => {
     if (!currentUser) return { ok: false, message: '로그인이 필요합니다.' };
     const isAdminUser = currentUser.role === 'ADMIN';
+    // 정산 완료·지급 완료 처리는 관리자만
+    if (patch.settlement && !isAdminUser) {
+      pushToast({ type: 'error', title: '정산상황은 관리자만 변경할 수 있습니다' });
+      return { ok: false, message: '정산상황은 관리자만 변경할 수 있습니다.' };
+    }
     const results = new Map(
       transactions
         .filter((t) => txIds.includes(t.id) && canManageApprovalOf(t))

@@ -41,8 +41,12 @@ export const CmCombobox: React.FC<Props> = ({ id, cms, value, onChange, disabled
   };
 
   const listId = `${id}-list`;
+  const selectedLabel = selected
+    ? `${selected.name} · ${selected.affiliation}${selected.employeeId ? ` · ${selected.employeeId}` : ''}`
+    : '';
   return (
-    <div className="relative" data-arrow-nav="off">
+    // 목록이 열려 있을 때만 화살표를 목록 이동에 씀 (닫혀 있으면 다른 칸처럼 이동)
+    <div className="relative" data-arrow-nav={open ? 'off' : undefined}>
       <input
         ref={inputRef}
         id={id}
@@ -54,21 +58,28 @@ export const CmCombobox: React.FC<Props> = ({ id, cms, value, onChange, disabled
         aria-autocomplete="list"
         autoComplete="off"
         disabled={disabled}
-        value={open ? query : selected ? `${selected.name} · ${selected.affiliation}${selected.employeeId ? ` · ${selected.employeeId}` : ''}` : ''}
+        value={open ? query : selectedLabel}
         placeholder={open ? '이름 · 소속 · 사번 · 연락처로 검색' : 'CM 선택'}
-        onFocus={openList}
+        // 이미 CM을 골랐으면 포커스만으로는 열지 않음 (클릭 또는 Enter로 열기)
+        onFocus={() => !value && openList()}
         onClick={() => !open && openList()}
         onBlur={() => setOpen(false)}
         onChange={(e) => {
-          setQuery(e.target.value);
+          // 닫힌 상태에서 바로 글자를 치면 선택된 이름 뒤에 붙은 글자만 검색어로 사용
+          const typed = open ? e.target.value : e.target.value.replace(selectedLabel, '');
+          setQuery(typed);
           setOpen(true);
           setActive(0);
         }}
         onKeyDown={(e) => {
           if (e.nativeEvent.isComposing) return;
+          if (!open && e.key.startsWith('Arrow')) {
+            e.preventDefault();
+            if (inputRef.current) focusNext(inputRef.current, e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1);
+            return;
+          }
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
-            if (!open) return openList();
             const step = e.key === 'ArrowDown' ? 1 : -1;
             setActive((i) => Math.min(matches.length - 1, Math.max(0, i + step)));
           } else if (e.key === 'Enter') {
@@ -77,6 +88,11 @@ export const CmCombobox: React.FC<Props> = ({ id, cms, value, onChange, disabled
             else if (!open) openList();
           } else if (e.key === 'Escape') {
             setOpen(false);
+          } else if (open && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !query) {
+            // 검색어 없이 열려 있으면 좌우 화살표로 옆 칸 이동
+            e.preventDefault();
+            setOpen(false);
+            if (inputRef.current) focusNext(inputRef.current, e.key === 'ArrowLeft' ? -1 : 1);
           }
         }}
         className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-3.5 pr-9 text-sm font-bold text-slate-900 placeholder:font-medium placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"

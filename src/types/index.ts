@@ -163,6 +163,7 @@ export interface PaymentSplitItem {
   agCommissionRate: number; // AG측 수수료율 (%)
   cmCommissionRate: number; // CM측 수수료율 (%)
   customConditionNote?: string; // 별도 조건 메모
+  downPayment?: string; // 선수금 비율 ('10%' 등, 없으면 '' 또는 비움). 요율표 적용금액구간의 '선수금 N%'에서 가져옴
 }
 
 // 요율표 - 이미지 형식 항목 (Admin이 추가/관리)

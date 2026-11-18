@@ -128,17 +128,33 @@ function getMonthMatchScore(monthsStr: string | undefined, targetMonth: number):
   return 0;
 }
 
+// 요율표 적용금액구간(F열)의 '선수금 10%' 같은 표기 → '10%'. 무선수·전액할부 등은 ''(선수금 없음)
+function downPaymentOf(r: RateTableRowItem): string {
+  const m = [r.amountTier, r.category, r.remark].join(' ').match(/선수금\s*(\d+(?:\.\d+)?)\s*%/);
+  return m ? `${m[1]}%` : '';
+}
+
+/** 이 행들에 있는 선수금 단계 (없음 먼저, 비율 오름차순). 2개 이상일 때만 선택지 표시 */
+function downPaymentOptions(rows: RateTableRowItem[]): string[] {
+  return Array.from(new Set(rows.map(downPaymentOf))).sort((x, y) => (parseFloat(x) || 0) - (parseFloat(y) || 0));
+}
+
 function findBestRateRowForAmount(
   rows: RateTableRowItem[],
   cardCompany: SplitCardCompany,
   paymentMethod: SplitPaymentMethod,
   amount: number,
   preferredCategory?: string,
-  targetMonths?: number
+  targetMonths?: number,
+  downPayment = ''
 ): RateTableRowItem | undefined {
-  const baseRows = rows.filter(
+  let baseRows = rows.filter(
     (r) => r.cardCompany === cardCompany && isMethodMatch(r.paymentMethod, paymentMethod)
   );
+  if (paymentMethod !== '일시불' && downPaymentOptions(baseRows).length > 1) {
+    const sameDp = baseRows.filter((r) => downPaymentOf(r) === downPayment);
+    if (sameDp.length > 0) baseRows = sameDp;
+  }
   if (baseRows.length === 0) return undefined;
 
   const targetCategory = normalizeCategoryName(preferredCategory);
@@ -273,6 +289,22 @@ export const TransactionRegisterPageV2: React.FC = () => {
   // 현재 열려있는 단계 (1: 카드사·결제방법 선택, 2: 고객/CM 및 결제 정보 입력)
   const [activeStep, setActiveStep] = useState<1 | 2>(1);
   const methodGroupRef = useRef<HTMLDivElement>(null);
+  const cardGroupRef = useRef<HTMLDivElement>(null);
+
+  // 아무 칸도 선택하지 않은 상태에서 방향키를 누르면 카드사 선택(선택된 카드 또는 첫 카드)으로 이동
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.key.startsWith('Arrow')) return;
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const cards = cardGroupRef.current?.querySelectorAll<HTMLButtonElement>('button');
+      if (!cards?.length) return;
+      e.preventDefault();
+      (Array.from(cards).find((b) => b.getAttribute('aria-pressed') === 'true') || cards[0]).focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   const [isConfirmOpen, setIsConfirmOpen] = useState<boolean>(false);
 
   // 각 단계 입력 상태
@@ -607,7 +639,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
       split.paymentMethod,
       nextAmount,
       preferredCat,
-      split.installmentMonths
+      split.installmentMonths,
+      split.downPayment
     );
 
     if (matchedRow) {
@@ -639,7 +672,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
       split.paymentMethod,
       split.amount,
       normalizedNextCat,
-      split.installmentMonths
+      split.installmentMonths,
+      split.downPayment
     );
 
     if (matchedRow) {
@@ -657,6 +691,34 @@ export const TransactionRegisterPageV2: React.FC = () => {
     }
   };
 
+  // 선수금 있음/없음 변경 → 해당 조건 중 금액·구분·개월에 맞는 요율 자동 적용
+  const handleSplitDownPaymentChange = (index: number, on: string) => {
+    const split = paymentSplits[index];
+    if (!split) return;
+    const card = selectedCard || split.cardCompany;
+    const matchedRow = findBestRateRowForAmount(
+      rateTableRows,
+      card,
+      split.paymentMethod,
+      split.amount,
+      normalizeCategoryName(split.rateCategory),
+      split.installmentMonths,
+      on
+    );
+    if (matchedRow) {
+      updateSplit(index, {
+        downPayment: on,
+        rateCategory: normalizeCategoryName(matchedRow.category),
+        interestRate: matchedRow.interestRate,
+        agCommissionRate: matchedRow.agCommissionRate,
+        cmCommissionRate: matchedRow.cmCommissionRate,
+      });
+      setSelectedRateRowIds((prev) => ({ ...prev, [index]: matchedRow.id }));
+    } else {
+      updateSplit(index, { downPayment: on });
+    }
+  };
+
   // 3단계: 할부 개월수 버튼 클릭 시 해당 개월수 및 결제 금액대에 맞는 요율 자동 선택 및 반영
   const handleSplitMonthsChange = (index: number, nextMonths: number) => {
     const split = paymentSplits[index];
@@ -670,7 +732,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
       split.paymentMethod,
       split.amount,
       preferredCat,
-      nextMonths
+      nextMonths,
+      split.downPayment
     );
 
     if (matchedRow) {
@@ -705,7 +768,8 @@ export const TransactionRegisterPageV2: React.FC = () => {
       nextSubMethod,
       split.amount,
       preferredCat,
-      split.installmentMonths
+      split.installmentMonths,
+      split.downPayment
     );
 
     const isLump = nextSubMethod === '일시불';
@@ -734,6 +798,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     const nums = monthsClean.match(/\d+/g)?.map(Number) || [];
     const targetMonths = nums.length > 0 ? nums[0] : undefined;
 
+    const rowDownPayment = isLump ? undefined : downPaymentOf(row);
     if (selectedMethodType === '혼합') {
       const idx =
         targetSplitIndex !== undefined
@@ -745,6 +810,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
         paymentMethod: row.paymentMethod,
         rateCategory: rowCat,
         installmentMonths: !isLump && targetMonths ? targetMonths : undefined,
+        downPayment: rowDownPayment,
         cashbackRate: isLump ? row.cashbackRate : 0,
         interestRate: isLump ? 0 : row.interestRate,
         agCommissionRate: row.agCommissionRate,
@@ -756,6 +822,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
         paymentMethod: row.paymentMethod,
         rateCategory: rowCat,
         installmentMonths: !isLump && targetMonths ? targetMonths : undefined,
+        downPayment: rowDownPayment,
         cashbackRate: isLump ? row.cashbackRate : 0,
         interestRate: isLump ? 0 : row.interestRate,
         agCommissionRate: row.agCommissionRate,
@@ -1127,7 +1194,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
             <div className="space-y-6 border-t border-slate-100 p-4 sm:p-5">
               <div>
                 <p className="mb-3 text-xs font-extrabold text-slate-800">카드사</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+                <div ref={cardGroupRef} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {SPLIT_CARD_COMPANIES.map((cardKey) => {
                   const colorMeta = CARD_COMPANY_COLORS[cardKey];
                   const displayName = V2_CARD_DISPLAY_NAMES[cardKey];
@@ -1138,8 +1205,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
                     <button
                       key={cardKey}
                       type="button"
+                      aria-pressed={isSelected}
+                      aria-label={displayName}
                       onClick={() => handleSelectCard(cardKey)}
-                      className={`group relative flex flex-col justify-between rounded-2xl p-4 text-left transition-all min-h-[132px] border overflow-hidden ${
+                      className={`group relative flex flex-col justify-between rounded-2xl p-4 text-left transition-all border overflow-hidden ${
                         isSelected
                           ? 'border-slate-900 bg-slate-900 text-white shadow-md ring-2 ring-slate-900/20'
                           : 'border-slate-200 bg-gradient-to-br from-white via-white to-slate-50/90 text-slate-900 hover:border-slate-400 hover:shadow-xs'
@@ -1151,81 +1220,43 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         style={{ backgroundColor: colorMeta.mainHex }}
                       />
 
-                      {/* 상단: 카드사 공식 로고 엠블럼 & 선택 체크 */}
-                      <div className="flex items-start justify-between gap-2 pt-1">
-                        {logoUrl ? (
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-xl p-1.5 border transition-transform group-hover:scale-105 ${
-                              isSelected
-                                ? 'border-white/20 bg-white shadow-2xs'
-                                : 'border-slate-200/80 bg-white shadow-2xs'
-                            }`}
-                          >
-                            <img
-                              src={logoUrl}
-                              alt={`${displayName} 로고`}
-                              className="h-full w-full object-contain"
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            className="flex h-10 w-10 items-center justify-center rounded-xl text-xs font-black tracking-tight shadow-2xs"
-                            style={{
-                              backgroundColor: colorMeta.softBgHex,
-                              color: colorMeta.darkTextHex,
-                              border: `1px solid ${colorMeta.softBorderHex}40`,
-                            }}
-                          >
-                            {cardKey === '하나' ? '하나' : '제휴'}
-                          </div>
-                        )}
-
-                        {isSelected ? (
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 text-slate-950 shadow-2xs">
-                            <Check className="h-3 w-3 stroke-[3]" />
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-mono font-bold tracking-widest text-slate-300">
-                            AUTO
-                          </span>
-                        )}
-                      </div>
-
-                      {/* 중단: 실물 신용카드 스타일 IC 칩 */}
-                      <div className="my-2.5 flex items-center justify-between">
-                        <div
-                          className={`h-5 w-7 rounded-sm border flex items-center justify-center ${
-                            isSelected
-                              ? 'border-amber-300/60 bg-amber-300/20'
-                              : 'border-amber-400/60 bg-amber-100/70'
-                          }`}
-                        >
-                          <CreditCard
-                            className={`h-3 w-3 ${
-                              isSelected ? 'text-amber-300' : 'text-amber-700'
-                            }`}
-                          />
-                        </div>
-                        <span
-                          className={`text-[10px] font-mono tracking-widest ${
-                            isSelected ? 'text-slate-400' : 'text-slate-300'
-                          }`}
-                        >
-                          ••••
-                        </span>
-                      </div>
-
-                      {/* 하단: 카드사명 */}
-                      <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-200/50">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span
-                            className="h-2 w-2 rounded-full shrink-0"
-                            style={{ backgroundColor: colorMeta.mainHex }}
-                          />
-                          <span className="text-sm font-extrabold tracking-tight truncate">
+                      {/* 상단: 로고 + 카드사명(크게) & 선택 체크 */}
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          {logoUrl ? (
+                            <div
+                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl p-1.5 border transition-transform group-hover:scale-105 ${
+                                isSelected ? 'border-white/20 bg-white shadow-2xs' : 'border-slate-200/80 bg-white shadow-2xs'
+                              }`}
+                            >
+                              <img src={logoUrl} alt="" className="h-full w-full object-contain" />
+                            </div>
+                          ) : (
+                            <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: colorMeta.mainHex }} />
+                          )}
+                          <span className="truncate text-[1.625rem] font-extrabold leading-none tracking-tight">
                             {displayName}
                           </span>
                         </div>
+                        {isSelected && (
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400 text-slate-950 shadow-2xs">
+                            <Check className="h-3 w-3 stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 하단: 실물 신용카드 스타일 IC 칩 */}
+                      <div className="mt-4 flex items-center justify-between">
+                        <div
+                          className={`h-5 w-7 rounded-sm border flex items-center justify-center ${
+                            isSelected ? 'border-amber-300/60 bg-amber-300/20' : 'border-amber-400/60 bg-amber-100/70'
+                          }`}
+                        >
+                          <CreditCard className={`h-3 w-3 ${isSelected ? 'text-amber-300' : 'text-amber-700'}`} />
+                        </div>
+                        <span className={`text-[10px] font-mono tracking-widest ${isSelected ? 'text-slate-400' : 'text-slate-300'}`}>
+                          ••••
+                        </span>
                       </div>
                     </button>
                   );
@@ -1688,13 +1719,18 @@ export const TransactionRegisterPageV2: React.FC = () => {
                           split.paymentMethod,
                           split.amount,
                           normalizeCategoryName(split.rateCategory),
-                          split.installmentMonths
+                          split.installmentMonths,
+                          split.downPayment
                         );
-                      const methodRateRows = rateTableRows.filter(
+                      const allMethodRows = rateTableRows.filter(
                         (r) =>
                           r.cardCompany === selectedCard &&
                           isMethodMatch(r.paymentMethod, split.paymentMethod)
                       );
+                      const dpOptions = isLumpSum ? [] : downPaymentOptions(allMethodRows);
+                      const showDownPayment = dpOptions.length > 1;
+                      const sameDpRows = allMethodRows.filter((r) => downPaymentOf(r) === (split.downPayment || ''));
+                      const methodRateRows = showDownPayment && sameDpRows.length > 0 ? sameDpRows : allMethodRows;
                       const availableCategories = Array.from(
                         new Set(
                           methodRateRows.map((r) => normalizeCategoryName(r.category))
@@ -1769,6 +1805,13 @@ export const TransactionRegisterPageV2: React.FC = () => {
                               <span className="text-xs font-bold text-slate-700">
                                 구분 (유형 옵션)
                               </span>
+                              {availableCategories.length === 1 ? (
+                                // 선택지가 하나뿐이면 자동 선택된 값만 표시 (키보드·탭 이동에서 제외)
+                                <span className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700">
+                                  {availableCategories[0]}
+                                  <span className="ml-1 font-medium text-slate-400">자동</span>
+                                </span>
+                              ) : (
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {availableCategories.map((cat) => {
                                   const isActiveCat = activeCategory === cat;
@@ -1788,8 +1831,36 @@ export const TransactionRegisterPageV2: React.FC = () => {
                                   );
                                 })}
                               </div>
+                              )}
                             </div>
                           </div>
+
+                          {showDownPayment && (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-slate-700">선수금</span>
+                                <div role="radiogroup" aria-label="선수금" className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-0.5">
+                                  {dpOptions.map((dp) => {
+                                    const isOn = (split.downPayment || '') === dp;
+                                    return (
+                                      <button
+                                        key={dp || 'none'}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={isOn}
+                                        onClick={() => handleSplitDownPaymentChange(idx, dp)}
+                                        className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                                          isOn ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        {dp || '없음 (전액할부)'}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {/* 1. 결제 금액 입력 */}
                           <div>
@@ -2335,6 +2406,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
                         {paymentSplits.length > 1 && `#${i + 1} `}
                         {sp.paymentMethod === '다이렉트할부' ? '다이렉트' : sp.paymentMethod}
                         {sp.paymentMethod !== '일시불' && ` ${sp.installmentMonths}개월`} · {sp.rateCategory || '일반'}
+                        {sp.downPayment && ` · 선수금 ${sp.downPayment}`}
                       </p>
                       <p className="text-slate-500">
                         {sp.paymentMethod === '일시불' ? `캐시백 ${sp.cashbackRate}%` : `금리 ${sp.interestRate}%`} · CM{' '}
