@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
+import { useStatusChange } from '../../components/v2/StatusChange';
 import {
   APPROVAL_STATUS_META,
   CARD_COMPANY_COLORS,
@@ -136,8 +137,11 @@ export const MonthlySettlementPageV2: React.FC = () => {
   const [methodFilter, setMethodFilter] = useState<V2PaymentMethodType | 'ALL'>('ALL');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  // 상세 보기 모달용 선택 거래
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  // 상세 보기 모달용 선택 거래 (id로 찾아서 상태 변경이 바로 반영되게)
+  const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+  const selectedTx = selectedTxId ? transactions.find((t) => t.id === selectedTxId) || null : null;
+  const setSelectedTx = (tx: Transaction | null) => setSelectedTxId(tx ? tx.id : null);
+  const { statusControls, statusDialog } = useStatusChange();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const cmUsers = useMemo(
@@ -898,6 +902,12 @@ export const MonthlySettlementPageV2: React.FC = () => {
                 </div>
               </div>
 
+              {/* 진행상황·정산상황 변경 (대시보드와 같은 권한·확인 절차) */}
+              <div className="rounded-xl border border-slate-200 p-3.5 space-y-2.5">
+                <h3 className="font-extrabold text-slate-900">상태 변경</h3>
+                {statusControls([selectedTx.id], [selectedTx])}
+              </div>
+
               {/* 담당 CM 상세 */}
               <div className="rounded-xl border border-slate-200 p-3.5 space-y-2">
                 <h3 className="font-extrabold text-slate-900">담당 CM 정보</h3>
@@ -1086,6 +1096,7 @@ export const MonthlySettlementPageV2: React.FC = () => {
           </div>
         </div>
       )}
+      {statusDialog}
     </div>
   );
 };
