@@ -17,6 +17,7 @@ import {
 import { calcSplitTotals, formatKRW, formatNumber } from '../../utils/format';
 import { DecimalInput } from '../../components/DecimalInput';
 import { CmCombobox } from '../../components/v2/CmCombobox';
+import { GuidePanel, useGuideMode } from '../../components/v2/GuidePanel';
 import {
   Check,
   ChevronDown,
@@ -322,6 +323,10 @@ export const TransactionRegisterPageV2: React.FC = () => {
 
   // 고객 / CM 정보 및 비고
   const [customerName, setCustomerName] = useState<string>('');
+  // 가이드모드 (대시보드 하단에서 켜고 끔): 켜져 있으면 등록 화면 옆에 카드사별 업무 가이드 패널
+  const { guideMode } = useGuideMode();
+  const [isGuideOpen, setIsGuideOpen] = useState<boolean>(true);
+  const showGuide = guideMode && isGuideOpen;
   const [selectedCmId, setSelectedCmId] = useState<string>(() => cmUsers[0]?.id || '');
   const [requestMemo, setRequestMemo] = useState<string>('');
 
@@ -1012,7 +1017,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
   const selectedCmObj = cmUsers.find((c) => c.id === selectedCmId);
 
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${showGuide ? 'lg:mr-[360px]' : ''}`}>
       {/* 상단 헤더 & 임시저장 컨트롤 바 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-white rounded-xl border border-slate-200 px-4 py-3.5 shadow-2xs">
         <div>
@@ -2453,6 +2458,26 @@ export const TransactionRegisterPageV2: React.FC = () => {
           </div>
         </div>
       )}
+      {guideMode &&
+        (isGuideOpen ? (
+          <GuidePanel
+            splits={paymentSplits}
+            fallbackCard={selectedCard}
+            customerName={customerName}
+            cmName={cmUsers.find((u) => u.id === selectedCmId)?.name || ''}
+            agentName={currentUser?.name || ''}
+            progressKey={editingTxIdV2 || 'new'}
+            onClose={() => setIsGuideOpen(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsGuideOpen(true)}
+            className="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-lg bg-slate-900 px-1.5 py-3 text-xs font-bold text-white shadow-lg [writing-mode:vertical-rl] hover:bg-slate-800"
+          >
+            업무 가이드
+          </button>
+        ))}
     </div>
   );
 };

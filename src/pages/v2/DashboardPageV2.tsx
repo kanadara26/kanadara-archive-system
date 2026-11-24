@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { useStatusChange } from '../../components/v2/StatusChange';
+import { useGuideMode } from '../../components/v2/GuidePanel';
 import {
   APPROVAL_STATUS_META,
   CARD_COMPANY_COLORS,
@@ -70,6 +71,7 @@ export const DashboardPageV2: React.FC = () => {
   } = useApp();
   const navigate = useNavigate();
   const { statusControls, statusDialog } = useStatusChange();
+  const { guideMode, toggleGuideMode } = useGuideMode();
 
   const [isDraftListOpen, setIsDraftListOpen] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<ProgressFilter>('ALL');
@@ -938,6 +940,13 @@ export const DashboardPageV2: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* 가이드모드: 일부러 눈에 덜 띄게 맨 아래 작은 글씨 */}
+      <div className="flex justify-end pt-6">
+        <button type="button" onClick={toggleGuideMode} className="text-[10px] text-slate-300 hover:text-slate-500">
+          가이드모드 {guideMode ? '끄기' : '켜기'}
+        </button>
+      </div>
 
       {statusDialog}
     </div>
