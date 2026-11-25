@@ -205,7 +205,7 @@ export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName
     <aside
       aria-label="가이드모드"
       data-arrow-nav="off"
-      className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[360px]"
+      className="fixed bottom-0 right-0 top-[65px] z-40 flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[360px]"
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
         <div className="flex min-w-0 items-center gap-2">

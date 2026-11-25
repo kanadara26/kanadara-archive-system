@@ -18,6 +18,8 @@ import { calcSplitTotals, formatKRW, formatNumber } from '../../utils/format';
 import { DecimalInput } from '../../components/DecimalInput';
 import { CmCombobox } from '../../components/v2/CmCombobox';
 import { GuidePanel, useGuideMode } from '../../components/v2/GuidePanel';
+import { PromotionPicker, toPromotionSnapshot } from '../../components/v2/PromotionPicker';
+import type { AppliedPromotionSnapshot } from '../../types';
 import {
   Check,
   ChevronDown,
@@ -258,6 +260,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     users,
     transactions,
     rateTableRows,
+    cardPromotions,
     refreshFromSheet,
     draftsV2,
     saveDraftV2,
@@ -316,6 +319,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
   // 승인일자는 기본 공백(''), 진행상황이 '카드 승인'으로 변경될 때 자동 기록
   const [approvalDate, setApprovalDate] = useState<string>('');
   const [paymentSplits, setPaymentSplits] = useState<PaymentSplitItem[]>([]);
+  const [appliedPromotions, setAppliedPromotions] = useState<AppliedPromotionSnapshot[]>([]);
   const [selectedRateRowIds, setSelectedRateRowIds] = useState<Record<number, string>>({});
   const [rateTableCategoryFilter, setRateTableCategoryFilter] = useState<string>('전체');
   // 우측 요율표: 기본은 적용 중인 옵션만, 적용을 해제하면 전체 옵션 표시
@@ -371,6 +375,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     setRequestDate(target.requestDate || todayStr);
     setApprovalDate(target.approvalDate || '');
     setPaymentSplits(target.paymentSplits.map((s) => ({ ...s, cardCompany: card })));
+    setAppliedPromotions(target.appliedPromotions || []);
     setCustomerName(target.customerName);
     setSelectedCmId(target.cmId);
     setRequestMemo(target.requestMemo || '');
@@ -389,6 +394,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
       setRequestDate(found.requestDate || todayStr);
       setApprovalDate(found.approvalDate || '');
       setPaymentSplits(found.paymentSplits || []);
+      setAppliedPromotions(found.appliedPromotions || []);
       setCustomerName(found.customerName || '');
       setSelectedCmId(found.cmId || cmUsers[0]?.id || '');
       setRequestMemo(found.requestMemo || '');
@@ -475,7 +481,24 @@ export const TransactionRegisterPageV2: React.FC = () => {
   };
 
   // 결제 합계 및 예상 수수료 실시간 계산
-  const totals = useMemo(() => calcSplitTotals(paymentSplits), [paymentSplits]);
+  // 적용 프로모션: 지금 고른 카드사 것만 (카드사를 바꾸면 자동으로 빠짐)
+  const cardAppliedPromotions = useMemo(
+    () => appliedPromotions.filter((p) => p.cardCompany === selectedCard),
+    [appliedPromotions, selectedCard]
+  );
+  const cardActivePromotions = useMemo(
+    () => cardPromotions.filter((p) => p.isActive && p.cardCompany === selectedCard),
+    [cardPromotions, selectedCard]
+  );
+  const handleTogglePromotion = (p: (typeof cardPromotions)[number]) =>
+    setAppliedPromotions((prev) =>
+      prev.some((a) => a.promotionId === p.id) ? prev.filter((a) => a.promotionId !== p.id) : [...prev, toPromotionSnapshot(p)]
+    );
+
+  const totals = useMemo(
+    () => calcSplitTotals(paymentSplits, cardAppliedPromotions),
+    [paymentSplits, cardAppliedPromotions]
+  );
 
   // 카드사별 결제방법 등록 건수 계산 (미등록 방법 비활성화 표기용)
   const cardMethodCounts = useMemo(() => {
@@ -863,6 +886,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     setRequestDate(todayStr);
     setApprovalDate('');
     setPaymentSplits([]);
+    setAppliedPromotions([]);
     setSelectedRateRowIds({});
     setCustomerName('');
     setRequestMemo('');
@@ -888,6 +912,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
       requestDate,
       approvalDate,
       paymentSplits,
+      appliedPromotions: cardAppliedPromotions,
       customerName,
       cmId: selectedCmId,
       requestMemo,
@@ -904,6 +929,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
     setRequestDate(draft.requestDate || todayStr);
     setApprovalDate(draft.approvalDate || '');
     setPaymentSplits(draft.paymentSplits || []);
+    setAppliedPromotions(draft.appliedPromotions || []);
     setCustomerName(draft.customerName || '');
     setSelectedCmId(draft.cmId || cmUsers[0]?.id || '');
     setRequestMemo(draft.requestMemo || '');
@@ -1002,6 +1028,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
       settlementStatus: existingTx ? existingTx.settlementStatus : '정산 대기',
       cmId: selectedCmId,
       paymentSplits: paymentSplits.map((s) => ({ ...s, cardCompany: selectedCard })),
+      appliedPromotions: cardAppliedPromotions,
       requestMemo: requestMemo.trim() || undefined,
     });
     setIsConfirmOpen(false);
@@ -2085,6 +2112,15 @@ export const TransactionRegisterPageV2: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  <PromotionPicker
+                    promotions={cardActivePromotions}
+                    splits={paymentSplits}
+                    refDate={approvalDate || requestDate}
+                    applied={cardAppliedPromotions}
+                    onToggle={handleTogglePromotion}
+                    onRemove={(id) => setAppliedPromotions((prev) => prev.filter((a) => a.promotionId !== id))}
+                  />
                 </div>
 
                 {/* 우측: 선택된 카드사 · 결제방법 맞춤 간소화 요율표 (5컬럼) */}
@@ -2422,6 +2458,11 @@ export const TransactionRegisterPageV2: React.FC = () => {
                   </div>
                 ))}
               </div>
+              {cardAppliedPromotions.length > 0 && (
+                <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700">
+                  <span className="font-bold text-slate-900">프로모션</span> · {cardAppliedPromotions.map((p) => p.title).join(', ')}
+                </p>
+              )}
               <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-900 p-3 text-white tabular-nums">
                 <div>
                   <span className="block text-[10px] text-slate-400">총 금액</span>

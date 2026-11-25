@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { useStatusChange } from '../../components/v2/StatusChange';
+import { MultiSelect } from '../../components/v2/MultiSelect';
 import {
   APPROVAL_STATUS_META,
   CARD_COMPANY_COLORS,
@@ -132,9 +133,10 @@ export const MonthlySettlementPageV2: React.FC = () => {
   const [dateBasis, setDateBasis] = useState<'APPROVAL' | 'REQUEST'>('APPROVAL');
 
   // 필터 상태 (카드사, 담당CM, 거래정보[결제방법], 키워드 검색)
-  const [cardFilter, setCardFilter] = useState<SplitCardCompany | 'ALL'>('ALL');
-  const [cmFilter, setCmFilter] = useState<string>('ALL');
-  const [methodFilter, setMethodFilter] = useState<V2PaymentMethodType | 'ALL'>('ALL');
+  // 복수 선택 (빈 배열 = 전체)
+  const [cardFilter, setCardFilter] = useState<SplitCardCompany[]>([]);
+  const [cmFilter, setCmFilter] = useState<string[]>([]);
+  const [methodFilter, setMethodFilter] = useState<V2PaymentMethodType[]>([]);
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
   // 상세 보기 모달용 선택 거래 (id로 찾아서 상태 변경이 바로 반영되게)
@@ -226,12 +228,13 @@ export const MonthlySettlementPageV2: React.FC = () => {
         if (endDate && refDate > endDate) return false;
 
         const txCard = tx.paymentSplits[0]?.cardCompany || '제휴카드사(삼성)';
-        if (cardFilter !== 'ALL' && txCard !== cardFilter) return false;
+        // 혼합 결제는 결제 행 중 하나라도 고른 카드사면 포함
+        if (cardFilter.length && !tx.paymentSplits.some((sp) => cardFilter.includes(sp.cardCompany))) return false;
 
-        if (cmFilter !== 'ALL' && tx.cmId !== cmFilter) return false;
+        if (cmFilter.length && !cmFilter.includes(tx.cmId)) return false;
 
         const txMethodType = getTxMethodTypeV2(tx);
-        if (methodFilter !== 'ALL' && txMethodType !== methodFilter) return false;
+        if (methodFilter.length && !methodFilter.includes(txMethodType)) return false;
 
         if (kw) {
           const cardDisplayName = V2_CARD_DISPLAY_NAMES[txCard];
@@ -305,7 +308,7 @@ export const MonthlySettlementPageV2: React.FC = () => {
     const header = [
       '거래번호', '승인일', '작성일', '고객명', '진행상황', '정산상태', '담당CM', 'CM소속',
       'CM주민번호', 'CM사업자번호', 'CM연락처', '카드사', '결제정보', '거래금액',
-      'CM수수료', 'CM요율(%)', 'AG수수료', 'AG요율(%)', '비고',
+      'CM수수료', 'CM요율(%)', 'AG수수료', 'AG요율(%)', '프로모션', '비고',
     ];
     const rows = filteredTransactions.map((tx) => {
       const calc = calcSplitTotals(tx.paymentSplits, tx.appliedPromotions);
@@ -317,28 +320,29 @@ export const MonthlySettlementPageV2: React.FC = () => {
         tx.settlementStatus || '정산 대기', tx.cmProfile.name, tx.cmProfile.affiliation,
         ids.rrn, ids.businessNumber, ids.phone, V2_CARD_DISPLAY_NAMES[card],
         getTxPaymentDetailSummary(tx), calc.totalAmount, calc.totalCmCommission,
-        calc.effectiveCmRate, calc.totalAgCommission, calc.effectiveAgRate, tx.requestMemo || '',
+        calc.effectiveCmRate, calc.totalAgCommission, calc.effectiveAgRate,
+        (tx.appliedPromotions || []).map((p) => p.title).join(' / '), tx.requestMemo || '',
       ];
     });
     rows.push([
       '합계', '', '', `${summary.txCount}건`, '', '', `거래선 ${summary.partnerCount}곳`, '', '', '', '', '', '',
-      summary.totalAmount, summary.totalCmCommission, '', summary.totalAgCommission, '', '',
+      summary.totalAmount, summary.totalCmCommission, '', summary.totalAgCommission, '', '', '',
     ]);
     const label = isCustomRange ? `${startDate}~${endDate}` : `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
     downloadCsv(`카나다라_정산_${label}.csv`, [header, ...rows]);
   };
 
   const handleResetFilters = () => {
-    setCardFilter('ALL');
-    setCmFilter('ALL');
-    setMethodFilter('ALL');
+    setCardFilter([]);
+    setCmFilter([]);
+    setMethodFilter([]);
     setSearchKeyword('');
   };
 
   const hasActiveFilters =
-    cardFilter !== 'ALL' ||
-    cmFilter !== 'ALL' ||
-    methodFilter !== 'ALL' ||
+    cardFilter.length > 0 ||
+    cmFilter.length > 0 ||
+    methodFilter.length > 0 ||
     searchKeyword.trim() !== '';
 
   return (
@@ -525,56 +529,34 @@ export const MonthlySettlementPageV2: React.FC = () => {
 
           {/* 카드사별 필터 */}
           <div className="lg:col-span-3">
-            <select
-              aria-label="카드사 필터"
+            <MultiSelect
+              label="카드사"
+              options={SPLIT_CARD_COMPANIES.map((card) => ({ value: card, label: V2_CARD_DISPLAY_NAMES[card] }))}
               value={cardFilter}
-              onChange={(e) =>
-                setCardFilter(e.target.value as SplitCardCompany | 'ALL')
-              }
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-slate-900 focus:outline-none"
-            >
-              <option value="ALL">카드사: 전체</option>
-              {SPLIT_CARD_COMPANIES.map((card) => (
-                <option key={card} value={card}>
-                  카드사: {V2_CARD_DISPLAY_NAMES[card]}
-                </option>
-              ))}
-            </select>
+              onChange={setCardFilter}
+            />
           </div>
 
           {/* 담당 CM별 필터 */}
           <div className="lg:col-span-3">
-            <select
-              aria-label="담당 CM 필터"
+            <MultiSelect
+              label="담당 CM"
+              options={cmUsers.map((cm) => ({ value: cm.id, label: `${cm.name} (${cm.affiliation})` }))}
               value={cmFilter}
-              onChange={(e) => setCmFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-slate-900 focus:outline-none"
-            >
-              <option value="ALL">담당 CM: 전체</option>
-              {cmUsers.map((cm) => (
-                <option key={cm.id} value={cm.id}>
-                  담당 CM: {cm.name} ({cm.affiliation})
-                </option>
-              ))}
-            </select>
+              onChange={setCmFilter}
+            />
           </div>
 
           {/* 거래정보(결제방법)별 필터 */}
           <div className="lg:col-span-2 flex gap-1.5">
-            <select
-              aria-label="거래정보 결제방법 필터"
-              value={methodFilter}
-              onChange={(e) =>
-                setMethodFilter(e.target.value as V2PaymentMethodType | 'ALL')
-              }
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-slate-900 focus:outline-none"
-            >
-              <option value="ALL">결제방법: 전체</option>
-              <option value="일시불">일시불</option>
-              <option value="혼합">혼합</option>
-              <option value="다이렉트">다이렉트</option>
-              <option value="할부">할부</option>
-            </select>
+            <div className="min-w-0 flex-1">
+              <MultiSelect<V2PaymentMethodType>
+                label="결제방법"
+                options={(['일시불', '할부', '다이렉트', '혼합'] as const).map((m) => ({ value: m, label: m }))}
+                value={methodFilter}
+                onChange={setMethodFilter}
+              />
+            </div>
 
             {hasActiveFilters && (
               <button
@@ -1022,6 +1004,13 @@ export const MonthlySettlementPageV2: React.FC = () => {
                   );
                 })()}
               </div>
+
+              {(selectedTx.appliedPromotions || []).length > 0 && (
+                <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
+                  <span className="text-slate-400 block mb-0.5">적용 프로모션 (수수료 합계에 반영됨)</span>
+                  <p className="font-bold text-slate-800">{selectedTx.appliedPromotions!.map((p) => p.title).join(', ')}</p>
+                </div>
+              )}
 
               {selectedTx.requestMemo && (
                 <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
