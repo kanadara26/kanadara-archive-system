@@ -8,6 +8,7 @@ import { DashboardPageV2 } from './pages/v2/DashboardPageV2';
 import { TransactionRegisterPageV2 } from './pages/v2/TransactionRegisterPageV2';
 import { MonthlySettlementPageV2 } from './pages/v2/MonthlySettlementPageV2';
 import { SettingsPageV2 } from './pages/v2/SettingsPageV2';
+import { WorkCasePageV2 } from './pages/v2/WorkCasePageV2';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser } = useApp();
@@ -45,6 +46,14 @@ const AppRoutes: React.FC = () => {
         element={
           <ProtectedRoute>
             <DashboardPageV2 />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/work"
+        element={
+          <ProtectedRoute>
+            <WorkCasePageV2 />
           </ProtectedRoute>
         }
       />

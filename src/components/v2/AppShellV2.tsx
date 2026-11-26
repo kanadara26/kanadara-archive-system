@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { useArrowKeyNavigation } from '../../utils/keyboardNav';
+import { useGuideMode } from './GuidePanel';
 // 요율표 패널은 열 때만 불러옴 (첫 화면 로딩 가볍게)
 const RateTablePanel = lazy(() => import('../RateTablePanel').then((m) => ({ default: m.RateTablePanel })));
 import {
@@ -21,6 +22,7 @@ import {
   RefreshCw,
   Maximize2,
   Minimize2,
+  ListChecks,
 } from 'lucide-react';
 
 export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -42,6 +44,7 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
   } = useApp();
   const navigate = useNavigate();
   useArrowKeyNavigation();
+  const { guideMode } = useGuideMode();
   const containerWidth = isWideMode ? 'max-w-none' : 'max-w-6xl';
 
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -79,13 +82,15 @@ export const AppShellV2: React.FC<{ children: React.ReactNode }> = ({ children }
     setPasswordInput('');
   };
 
-  const navItems = [
+  const navItems: { to: string; label: string; shortLabel: string; icon: typeof LayoutDashboard; badge?: number }[] = [
     {
       to: '/dashboard',
       label: '대시보드',
       shortLabel: '대시보드',
       icon: LayoutDashboard,
     },
+    // 가이드모드일 때만: 승인건 등록 전 업무 진행
+    ...(guideMode ? [{ to: '/work', label: '업무 진행', shortLabel: '업무 진행', icon: ListChecks }] : []),
     {
       to: '/register',
       label: '거래 승인건 등록',

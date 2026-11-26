@@ -393,7 +393,25 @@ export const TransactionRegisterPageV2: React.FC = () => {
       setSelectedMethodType(found.paymentMethodType);
       setRequestDate(found.requestDate || todayStr);
       setApprovalDate(found.approvalDate || '');
-      setPaymentSplits(found.paymentSplits || []);
+      // 업무 진행에서 넘어온 결제 행은 요율이 비어 있음 → 금액·개월수에 맞는 요율을 미리 채움 (등록 화면에서 바꿀 수 있음)
+      const rowIds: Record<number, string> = {};
+      const splits = (found.paymentSplits || []).map((sp, i) => {
+        if (sp.agCommissionRate || sp.cmCommissionRate || sp.cashbackRate || sp.interestRate) return sp;
+        const row = findBestRateRowForAmount(rateTableRows, sp.cardCompany, sp.paymentMethod, sp.amount, undefined, sp.installmentMonths, sp.downPayment);
+        if (!row) return sp;
+        rowIds[i] = row.id;
+        const isLump = sp.paymentMethod === '일시불';
+        return {
+          ...sp,
+          rateCategory: normalizeCategoryName(row.category),
+          cashbackRate: isLump ? row.cashbackRate : 0,
+          interestRate: isLump ? 0 : row.interestRate,
+          agCommissionRate: row.agCommissionRate,
+          cmCommissionRate: row.cmCommissionRate,
+        };
+      });
+      setPaymentSplits(splits);
+      setSelectedRateRowIds(rowIds);
       setAppliedPromotions(found.appliedPromotions || []);
       setCustomerName(found.customerName || '');
       setSelectedCmId(found.cmId || cmUsers[0]?.id || '');
@@ -401,7 +419,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
       setActiveStep(found.cardCompany && found.paymentMethodType ? 2 : 1);
     }
     setPendingDraftIdV2(null);
-  }, [pendingDraftIdV2, draftsV2, todayStr, cmUsers, setEditingTxIdV2, setPendingDraftIdV2]);
+  }, [pendingDraftIdV2, draftsV2, todayStr, cmUsers, rateTableRows, setEditingTxIdV2, setPendingDraftIdV2]);
 
   // 선택된 카드사 + 결제방법에 맞는 요율표 필터링 (결제방법 순 · 금액 구간 오름차순 정렬)
   const matchingRateRows = useMemo(() => {
@@ -1001,6 +1019,11 @@ export const TransactionRegisterPageV2: React.FC = () => {
     }
     if (paymentSplits.some((s) => !s.amount || s.amount <= 0)) {
       pushToast({ type: 'error', title: '결제 금액을 0원보다 크게 입력해 주세요.' });
+      return;
+    }
+    // 업무 진행에서 넘어온 건은 요율이 비어 있음 → 요율표에서 조건을 골라야 등록
+    if (paymentSplits.some((s) => !s.agCommissionRate && !s.cmCommissionRate && !s.cashbackRate && !s.interestRate)) {
+      pushToast({ type: 'error', title: '요율 조건을 선택해 주세요.', description: '오른쪽 요율표에서 결제 행마다 조건을 골라 적용합니다.' });
       return;
     }
     if (!customerName.trim()) {
@@ -2507,7 +2530,7 @@ export const TransactionRegisterPageV2: React.FC = () => {
             customerName={customerName}
             cmName={cmUsers.find((u) => u.id === selectedCmId)?.name || ''}
             agentName={currentUser?.name || ''}
-            progressKey={editingTxIdV2 || 'new'}
+            progressKey={editingTxIdV2 || currentDraftId || 'new'}
             onClose={() => setIsGuideOpen(false)}
           />
         ) : (

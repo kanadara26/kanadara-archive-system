@@ -32,13 +32,20 @@ function save(key: string, value: unknown) {
   }
 }
 
+const MODE_EVENT = 'kanadara:guide-mode';
+
 export function useGuideMode() {
   const [on, setOn] = useState<boolean>(() => load(MODE_KEY, false));
-  const toggle = () =>
-    setOn((v) => {
-      save(MODE_KEY, !v);
-      return !v;
-    });
+  // 다른 곳(상단 메뉴 등)의 같은 훅도 바로 따라 바뀌도록
+  useEffect(() => {
+    const sync = () => setOn(load(MODE_KEY, false));
+    window.addEventListener(MODE_EVENT, sync);
+    return () => window.removeEventListener(MODE_EVENT, sync);
+  }, []);
+  const toggle = () => {
+    save(MODE_KEY, !on);
+    window.dispatchEvent(new Event(MODE_EVENT));
+  };
   return { guideMode: on, toggleGuideMode: toggle };
 }
 
@@ -81,7 +88,13 @@ function fillTemplate(tpl: string, splits: PaymentSplitItem[], cards: string, cu
   const inst = splits.filter((s) => s.paymentMethod !== '일시불');
   const sum = (xs: PaymentSplitItem[]) => xs.reduce((n, s) => n + (s.amount || 0), 0);
   const method = lump.length && inst.length ? '일시불+할부' : inst.length ? '할부' : lump.length ? '일시불' : '[결제방식]';
+  // 등록 화면 결제 행의 요율(요율표에서 적용한 값)
+  const rates = (xs: PaymentSplitItem[], k: 'cashbackRate' | 'interestRate') => [...new Set(xs.map((s) => `${s[k] || 0}%`))].join('/');
+  const cashback = lump.reduce((n, s) => n + Math.round(((s.amount || 0) * (s.cashbackRate || 0)) / 100), 0);
   const vals: Record<string, string> = {
+    캐시백률: lump.some((s) => s.cashbackRate) ? rates(lump, 'cashbackRate') : '[캐시백률]',
+    캐시백금액: cashback ? won(cashback) : '[캐시백금액]',
+    금리: inst.some((s) => s.interestRate) ? rates(inst, 'interestRate') : '[금리]',
     고객명: customer || '[고객명]',
     카드사: cards || '[카드사]',
     결제방식: method,
@@ -92,7 +105,7 @@ function fillTemplate(tpl: string, splits: PaymentSplitItem[], cards: string, cu
     CM: cm || '[CM 이름]',
     모집인: agent || '[이름]',
   };
-  return tpl.replace(/\{(고객명|카드사|결제방식|일시불금액|할부원금|개월|총금액|CM|모집인)\}/g, (_, k) => vals[k]);
+  return tpl.replace(/\{(고객명|카드사|결제방식|일시불금액|할부원금|개월|총금액|CM|모집인|캐시백률|캐시백금액|금리)\}/g, (_, k) => vals[k]);
 }
 
 interface Props {
@@ -102,11 +115,12 @@ interface Props {
   cmName: string;
   agentName: string;
   progressKey: string; // 거래 id 또는 'new'
-  onClose: () => void;
+  onClose?: () => void;
+  inline?: boolean; // 페이지 안에 붙여서 표시 (업무 진행 화면)
 }
 
 /** 등록 화면 옆 가이드 패널: 카드사·결제방식에 맞는 단계별 체크리스트 */
-export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName, cmName, agentName, progressKey, onClose }) => {
+export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName, cmName, agentName, progressKey, onClose, inline }) => {
   const [data, setData] = useState<GuideData>(() => {
     const saved = load<GuideData | null>(DATA_KEY, null);
     return saved && saved.version === DEFAULT_GUIDE.version ? saved : DEFAULT_GUIDE;
@@ -205,7 +219,11 @@ export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName
     <aside
       aria-label="가이드모드"
       data-arrow-nav="off"
-      className="fixed bottom-0 right-0 top-[65px] z-40 flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[360px]"
+      className={
+        inline
+          ? 'sticky top-20 flex h-[calc(100vh-6rem)] w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white'
+          : 'fixed bottom-0 right-0 top-[65px] z-40 flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[360px]'
+      }
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
         <div className="flex min-w-0 items-center gap-2">
@@ -224,9 +242,9 @@ export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName
               수정
             </button>
           )}
-          <button type="button" aria-label="가이드 닫기" onClick={onClose} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">
+          {onClose && <button type="button" aria-label="가이드 닫기" onClick={onClose} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">
             <X className="h-4 w-4" />
-          </button>
+          </button>}
         </div>
       </div>
       <div className="h-1 bg-slate-100">
@@ -382,7 +400,7 @@ export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName
                     {open && (
                       <div className="space-y-1.5 px-3 pb-3">
                         {sec.caution && (
-                          <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-900">{sec.caution}</p>
+                          <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-900">{fill(sec.caution)}</p>
                         )}
                         <ol className="space-y-1">
                           {sec.steps.map((st) => {
@@ -394,10 +412,10 @@ export const GuidePanel: React.FC<Props> = ({ splits, fallbackCard, customerName
                                   <input type="checkbox" checked={!!done[k]} onChange={() => toggleStep(k)} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-slate-900" />
                                   <span className={`text-xs leading-relaxed ${done[k] ? 'text-slate-400 line-through' : 'font-bold text-slate-800'}`}>
                                     {isCurrent && <span className="mr-1 rounded bg-slate-900 px-1 py-px text-[10px] font-bold text-white no-underline">지금</span>}
-                                    {st.text}
+                                    {fill(st.text)}
                                   </span>
                                 </label>
-                                {st.detail && !done[k] && <p className="ml-[22px] mt-0.5 text-[11px] leading-relaxed text-slate-600">{st.detail}</p>}
+                                {st.detail && !done[k] && <p className="ml-[22px] mt-0.5 text-[11px] leading-relaxed text-slate-600">{fill(st.detail)}</p>}
                                 {st.copy && !done[k] && (
                                   <div className="ml-[22px] mt-1 rounded-md border border-slate-200 bg-white p-2">
                                     <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">{fill(st.copy)}</p>
@@ -456,7 +474,7 @@ const StepEditor: React.FC<{
     <textarea rows={2} placeholder="설명 (선택)" className={inputCls} value={step.detail || ''} onChange={(e) => onChange({ detail: e.target.value })} />
     <textarea
       rows={2}
-      placeholder="복사 문구 (선택) · {고객명} {카드사} {결제방식} {일시불금액} {할부원금} {개월} {총금액} {CM} {모집인}"
+      placeholder="복사 문구 (선택) · {고객명} {카드사} {결제방식} {일시불금액} {할부원금} {개월} {총금액} {CM} {모집인} {캐시백률} {캐시백금액} {금리}"
       className={inputCls}
       value={step.copy || ''}
       onChange={(e) => onChange({ copy: e.target.value })}
